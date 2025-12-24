@@ -1,0 +1,49 @@
+# ============================================
+# Property Registration Telegram Bot
+# ربات تلگرام ثبت ملک
+# ============================================
+# Python Version: 3.10+
+# Last Updated: 2025-12-24
+# ============================================
+
+# === Telegram Bot Framework ===
+python-telegram-bot==21.3
+
+# === HTTP Client with Proxy Support ===
+httpx[socks]==0.27.0
+
+# === HTTP Requests ===
+requests==2.32.3
+
+# === Async HTTP ===
+aiohttp==3.9.5
+
+# === Environment Variables ===
+python-dotenv==1.0.1
+
+# === Audio Processing (برای STT) ===
+pydub==0.25.1
+# ⚠️ نیاز به نصب ffmpeg روی سیستم:
+#    Ubuntu/Debian: sudo apt install ffmpeg
+#    macOS: brew install ffmpeg
+#    Windows: https://ffmpeg.org/download.html
+
+# === Advanced Regex ===
+regex==2024.5.15
+
+# === JSON Parsing ===
+# (built-in در Python)
+
+# === Optional: Better Logging ===
+# colorlog==6.8.2
+
+# ============================================
+# نصب:
+#   pip install -r requirements.txt
+#
+# یا با virtual environment:
+#   python -m venv venv
+#   source venv/bin/activate  # Linux/Mac
+#   venv\Scripts\activate     # Windows
+#   pip install -r requirements.txt
+# ============================================

@@ -1,0 +1,204 @@
+# -------------------------------------------------
+# rule_engine.py (COMPLETE VERSION - با سوالات کامل آپارتمان)
+# -------------------------------------------------
+
+import logging
+from typing import Dict, Optional
+from conversation_state import set_pending_field
+
+logger = logging.getLogger(__name__)
+
+def run_rule_engine(data: Dict) -> Dict:
+    """
+    ✅ Rule Engine با سوالات کامل برای آپارتمان
+    Flow: Transaction → Type → [Apartment Details] → Specs → Price → Owner
+    """
+    user_id = data.get("_user_id")
+
+    # ============================================
+    # 1️⃣ نوع معامله (اولویت بالا)
+    # ============================================
+    if data.get("transaction_type") is None:
+        set_pending_field(user_id, "transaction_type")
+        return {
+            "status": "question",
+            "missing": "transaction_type",
+            "question": "🏷 قصد چه کاری دارید؟ (فروش / رهن و اجاره)",
+        }
+
+    # ============================================
+    # 2️⃣ نوع ملک (اولویت بالا)
+    # ============================================
+    if data.get("property_type") is None:
+        set_pending_field(user_id, "property_type")
+        return {
+            "status": "question",
+            "missing": "property_type",
+            "question": "🏠 نوع ملک چیست؟ (آپارتمان، ویلا، زمین، مغازه)",
+        }
+
+    # ============================================
+    # 3️⃣ سوالات ویژه آپارتمان
+    # ============================================
+    if data.get("property_type") in ["آپارتمان", "Apartment"]:
+        
+        # 3.1 نوع کاربری
+        if data.get("usage_type") is None:
+            set_pending_field(user_id, "usage_type")
+            return {
+                "status": "question",
+                "missing": "usage_type",
+                "question": "🏢 نوع کاربری چیست؟ (مسکونی / تجاری / اداری)",
+            }
+        
+        # 3.2 متراژ
+        if data.get("area") is None:
+            set_pending_field(user_id, "area")
+            return {
+                "status": "question",
+                "missing": "area",
+                "question": "📐 متراژ ملک چقدر است؟",
+            }
+        
+        # 3.3 تعداد اتاق خواب (فقط مسکونی)
+        if data.get("usage_type") in ["مسکونی", "Residential"]:
+            if data.get("bedroom_count") is None:
+                set_pending_field(user_id, "bedroom_count")
+                return {
+                    "status": "question",
+                    "missing": "bedroom_count",
+                    "question": "🛏 چند خواب دارد؟",
+                }
+        
+        # 3.4 تعداد کل طبقات ساختمان
+        if data.get("total_floors") is None:
+            set_pending_field(user_id, "total_floors")
+            return {
+                "status": "question",
+                "missing": "total_floors",
+                "question": "🏢 ساختمان چند طبقه است؟",
+            }
+        
+        # 3.5 واحد در کدام طبقه
+        if data.get("floor") is None:
+            set_pending_field(user_id, "floor")
+            return {
+                "status": "question",
+                "missing": "floor",
+                "question": "📍 واحد در چه طبقه‌ای است؟",
+            }
+        
+        # 3.6 تعداد واحد در هر طبقه
+        if data.get("unit_count") is None:
+            set_pending_field(user_id, "unit_count")
+            return {
+                "status": "question",
+                "missing": "unit_count",
+                "question": "🚪 هر طبقه چند واحد دارد؟",
+            }
+        
+        # 3.7 آسانسور
+        if data.get("has_elevator") is None:
+            set_pending_field(user_id, "has_elevator")
+            return {
+                "status": "question",
+                "missing": "has_elevator",
+                "question": "🛗 آسانسور دارد؟ (بله / خیر)",
+            }
+        
+        # 3.8 سال ساخت
+        if data.get("build_year") is None:
+            set_pending_field(user_id, "build_year")
+            return {
+                "status": "question",
+                "missing": "build_year",
+                "question": "📅 سال ساخت چه سالی است؟ (مثلاً 1402 یا نوساز)",
+            }
+    
+    # ============================================
+    # 4️⃣ سوالات عمومی (ویلا، زمین، مغازه)
+    # ============================================
+    else:
+        # برای غیر آپارتمان فقط متراژ
+        if data.get("area") is None:
+            set_pending_field(user_id, "area")
+            return {
+                "status": "question",
+                "missing": "area",
+                "question": "📐 متراژ ملک چقدر است؟",
+            }
+        
+        # برای ویلا: تعداد خواب
+        if data.get("property_type") in ["ویلا", "Villa", "ویلایی"]:
+            if data.get("bedroom_count") is None:
+                set_pending_field(user_id, "bedroom_count")
+                return {
+                    "status": "question",
+                    "missing": "bedroom_count",
+                    "question": "🛏 ویلا چند خواب دارد؟",
+                }
+
+    # ============================================
+    # 5️⃣ قیمت
+    # ============================================
+    if data.get("transaction_type") in ["فروش", "Sale", "پیش‌فروش"]:
+        if data.get("price_total") is None and data.get("price") is None:
+            set_pending_field(user_id, "price_total")
+            return {
+                "status": "question",
+                "missing": "price_total",
+                "question": "💰 قیمت کل چقدر است؟",
+            }
+
+    if data.get("transaction_type") in ["رهن و اجاره", "Rent", "اجاره"]:
+        if data.get("price_total") is None:
+            set_pending_field(user_id, "price_total")
+            return {
+                "status": "question",
+                "missing": "price_total",
+                "question": "💰 مبلغ رهن (ودیعه) چقدر است؟",
+            }
+        if data.get("rent") is None:
+            set_pending_field(user_id, "rent")
+            return {
+                "status": "question",
+                "missing": "rent",
+                "question": "💵 اجاره ماهیانه چقدر است؟",
+            }
+
+    # ============================================
+    # 6️⃣ محله/آدرس
+    # ============================================
+    if data.get("neighborhood") is None and data.get("city") is None:
+        set_pending_field(user_id, "neighborhood")
+        return {
+            "status": "question",
+            "missing": "neighborhood",
+            "question": "📍 ملک در کدام محله/منطقه است؟",
+        }
+
+    # ============================================
+    # 7️⃣ اطلاعات مالک
+    # ============================================
+    if data.get("owner_name") is None:
+        set_pending_field(user_id, "owner_name")
+        return {
+            "status": "question",
+            "missing": "owner_name",
+            "question": "👤 نام شریف شما؟",
+        }
+
+    if data.get("owner_phone") is None:
+        set_pending_field(user_id, "owner_phone")
+        return {
+            "status": "question",
+            "missing": "owner_phone",
+            "question": "📞 لطفاً شماره تماس خود را وارد کنید:",
+        }
+
+    # ✅ تکمیل شد
+    set_pending_field(user_id, None)
+    return {
+        "status": "completed",
+        "message": "✅ اطلاعات کامل شد.",
+    }
