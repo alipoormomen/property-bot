@@ -1,221 +1,430 @@
-# bot_processor.py - UPDATED with Keyboard Buttons
+# bot_processor.py - Main Processing Logic with Reply Keyboard Support
 import logging
-from typing import Dict
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
+from telegram.ext import ContextTypes
 
-from extractor import extract_json
-from phone_utils import normalize_iran_phone
-from rule_engine import run_rule_engine
-from conversation_state import (
-    merge_state,
-    get_pending_field,
-    get_state,
-    clear_state,
-    set_confirmation_mode,
-    is_confirmation_mode,
-)
-from services.inference_service import (
-    infer_property_type,
-    infer_usage_type,
-    normalize_location,
-)
-from utils import normalize_price, validate_area, validate_floor
+from conversation_state import ConversationState
+from rule_engine import apply_rules
+from extractor import extract_property_info
 from bot_utils import (
-    text_to_int,
-    normalize_yes_no,
+    format_property_summary,
     format_confirmation_message,
     parse_field_from_text,
+    normalize_yes_no,
+    text_to_int
 )
+from services.inference_service import normalize_location
 
 logger = logging.getLogger(__name__)
 
-# ✅ دکمه‌های انتخاب برای فیلدهای خاص
+# ========================================
+# 🎹 Reply Keyboard Options
+# ========================================
+
 KEYBOARD_OPTIONS = {
-    "transaction_type": [["فروش", "رهن و اجاره"], ["پیش‌فروش"]],
-    "property_type": [["آپارتمان", "ویلا"], ["زمین", "مغازه"]],
-    "usage_type": [["مسکونی", "تجاری"], ["اداری"]],
-    "has_parking": [["بله", "خیر"]],
-    "has_elevator": [["بله", "خیر"]],
-    "has_storage": [["بله", "خیر"]],
+    "transaction_type": {
+        "question": "نوع معامله را انتخاب کنید:",
+        "buttons": [
+            ["🏷️ فروش", "🔑 رهن و اجاره"],
+            ["🏗️ پیش‌فروش"]
+        ],
+        "mapping": {
+            "🏷️ فروش": "Sale",
+            "فروش": "Sale",
+            "🔑 رهن و اجاره": "Rent",
+            "رهن و اجاره": "Rent",
+            "رهن": "Rent",
+            "اجاره": "Rent",
+            "🏗️ پیش‌فروش": "Pre-sale",
+            "پیش‌فروش": "Pre-sale",
+            "پیش فروش": "Pre-sale"
+        }
+    },
+    "property_type": {
+        "question": "نوع ملک را انتخاب کنید:",
+        "buttons": [
+            ["🏢 آپارتمان", "🏠 ویلا"],
+            ["🏬 مغازه", "🌍 زمین"]
+        ],
+        "mapping": {
+            "🏢 آپارتمان": "Apartment",
+            "آپارتمان": "Apartment",
+            "🏠 ویلا": "Villa",
+            "ویلا": "Villa",
+            "🏬 مغازه": "Shop",
+            "مغازه": "Shop",
+            "🌍 زمین": "Land",
+            "زمین": "Land"
+        }
+    },
+    "usage_type": {
+        "question": "نوع کاربری ملک را انتخاب کنید:",
+        "buttons": [
+            ["🏠 مسکونی", "🏪 تجاری"],
+            ["🏛️ اداری"]
+        ],
+        "mapping": {
+            "🏠 مسکونی": "Residential",
+            "مسکونی": "Residential",
+            "🏪 تجاری": "Commercial",
+            "تجاری": "Commercial",
+            "🏛️ اداری": "Administrative",
+            "اداری": "Administrative"
+        }
+    },
+    "has_elevator": {
+        "question": "آیا ملک آسانسور دارد؟",
+        "buttons": [
+            ["✅ بله، دارد", "❌ خیر، ندارد"]
+        ],
+        "mapping": {
+            "✅ بله، دارد": True,
+            "بله": True,
+            "دارد": True,
+            "آره": True,
+            "❌ خیر، ندارد": False,
+            "خیر": False,
+            "ندارد": False,
+            "نه": False
+        }
+    },
+    "has_parking": {
+        "question": "آیا ملک پارکینگ دارد؟",
+        "buttons": [
+            ["✅ بله، دارد", "❌ خیر، ندارد"]
+        ],
+        "mapping": {
+            "✅ بله، دارد": True,
+            "بله": True,
+            "دارد": True,
+            "آره": True,
+            "❌ خیر، ندارد": False,
+            "خیر": False,
+            "ندارد": False,
+            "نه": False
+        }
+    },
+    "has_storage": {
+        "question": "آیا ملک انباری دارد؟",
+        "buttons": [
+            ["✅ بله، دارد", "❌ خیر، ندارد"]
+        ],
+        "mapping": {
+            "✅ بله، دارد": True,
+            "بله": True,
+            "دارد": True,
+            "آره": True,
+            "❌ خیر، ندارد": False,
+            "خیر": False,
+            "ندارد": False,
+            "نه": False
+        }
+    },
+    "confirmation": {
+        "question": "آیا اطلاعات بالا صحیح است؟",
+        "buttons": [
+            ["✅ تایید و ثبت", "✏️ ویرایش"],
+            ["🗑️ لغو و شروع مجدد"]
+        ],
+        "mapping": {
+            "✅ تایید و ثبت": "confirm",
+            "تایید": "confirm",
+            "بله": "confirm",
+            "✏️ ویرایش": "edit",
+            "ویرایش": "edit",
+            "🗑️ لغو و شروع مجدد": "cancel",
+            "لغو": "cancel",
+            "انصراف": "cancel"
+        }
+    }
 }
 
-async def handle_edit_request(user_id: int, text: str, update: Update) -> bool:
-    """Handle field edit requests in confirmation mode"""
-    parsed = parse_field_from_text(text)
-    if not parsed:
-        return False
 
-    field_name, new_value = parsed
-    logger.info(f"Edit request: {field_name} = {new_value}")
+# ========================================
+# 🔧 Helper Functions
+# ========================================
 
-    current_state = get_state(user_id)
-    processed_value = new_value
+def normalize_button_input(text: str, field: str) -> any:
+    """
+    تبدیل متن دکمه به مقدار سیستمی
+    مثال: "🏷️ فروش" -> "Sale"
+    """
+    if field in KEYBOARD_OPTIONS:
+        mapping = KEYBOARD_OPTIONS[field].get("mapping", {})
+        # اول دقیق چک کن
+        if text in mapping:
+            return mapping[text]
+        # بعد بدون ایموجی چک کن
+        text_clean = text.strip()
+        for key, value in mapping.items():
+            if key.endswith(text_clean) or text_clean.endswith(key.replace("🏷️ ", "").replace("🔑 ", "").replace("🏗️ ", "").replace("🏢 ", "").replace("🏠 ", "").replace("🏬 ", "").replace("🌍 ", "").replace("✅ ", "").replace("❌ ", "").replace("✏️ ", "").replace("🗑️ ", "")):
+                return value
+    return text
 
-    # Process based on field type
-    if field_name in ["area", "bedroom_count", "floor", "parking_count", "storage_count", "total_floors", "unit_count", "build_year"]:
-        processed_value = text_to_int(new_value)
-    elif field_name in ["price_total", "rent", "deposit"]:
-        processed_value = normalize_price(new_value)
-    elif field_name.startswith("has_"):
-        processed_value = normalize_yes_no(new_value)
-    elif field_name == "owner_phone":
-        processed_value = normalize_iran_phone(new_value)
 
-    # Update state
-    current_state[field_name] = processed_value
-    merge_state(user_id, {field_name: processed_value})
-
-    await update.message.reply_text(
-        f"فیلد '{field_name}' به '{processed_value}' تغییر یافت.\n\n"
-        f"{format_confirmation_message(current_state)}"
+def get_reply_keyboard(field: str) -> ReplyKeyboardMarkup:
+    """
+    ساخت Reply Keyboard برای فیلد مشخص
+    """
+    if field not in KEYBOARD_OPTIONS:
+        return None
+    
+    buttons = KEYBOARD_OPTIONS[field]["buttons"]
+    keyboard = [[KeyboardButton(btn) for btn in row] for row in buttons]
+    
+    return ReplyKeyboardMarkup(
+        keyboard,
+        resize_keyboard=True,
+        one_time_keyboard=True
     )
-    return True
 
-async def process_text(text: str, user_id: int, update: Update):
-    """Main text processing function"""
-    logger.info(f"INPUT from user {user_id}: {text}")
 
-    # Handle confirmation mode
-    if is_confirmation_mode(user_id):
-        current_state = get_state(user_id)
+def get_question_for_field(field: str) -> str:
+    """
+    دریافت سوال مناسب برای فیلد
+    """
+    if field in KEYBOARD_OPTIONS:
+        return KEYBOARD_OPTIONS[field]["question"]
+    
+    # سوالات پیش‌فرض برای فیلدهای بدون دکمه
+    default_questions = {
+        "neighborhood": "📍 محله ملک را وارد کنید:",
+        "city": "🏙️ شهر ملک را وارد کنید:",
+        "area": "📐 متراژ ملک را وارد کنید (به متر مربع):",
+        "bedroom_count": "🛏️ تعداد اتاق خواب را وارد کنید:",
+        "floor": "🏢 طبقه واحد را وارد کنید:",
+        "total_floors": "🏗️ تعداد کل طبقات ساختمان را وارد کنید:",
+        "unit_count": "🚪 تعداد واحد در هر طبقه را وارد کنید:",
+        "build_year": "📅 سال ساخت را وارد کنید:",
+        "price_total": "💰 قیمت کل یا مبلغ رهن را وارد کنید (تومان):",
+        "rent": "💵 مبلغ اجاره ماهانه را وارد کنید (تومان):",
+        "owner_name": "👤 نام مالک را وارد کنید:",
+        "owner_phone": "📞 شماره تماس مالک را وارد کنید:"
+    }
+    
+    return default_questions.get(field, f"لطفاً {field} را وارد کنید:")
 
-        # Check for confirmation
-        if text.strip().lower() in ["تأیید", "بله", "اره", "آره", "ok", "yes", "تایید"]:
+
+def has_keyboard(field: str) -> bool:
+    """
+    آیا این فیلد دکمه دارد؟
+    """
+    return field in KEYBOARD_OPTIONS and field != "confirmation"
+
+
+# ========================================
+# 🚀 Main Processing Functions
+# ========================================
+
+async def process_user_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    """
+    پردازش اصلی ورودی کاربر
+    """
+    user_id = update.effective_user.id
+    state = ConversationState.get_or_create(user_id)
+    
+    logger.info(f"[User {user_id}] Input: {text[:50]}... | State: {state.current_step}")
+    
+    # --- بررسی دستورات خاص ---
+    if text in ["لغو", "انصراف", "/cancel"]:
+        state.reset()
+        await update.message.reply_text(
+            "❌ عملیات لغو شد.\n\nبرای شروع مجدد، اطلاعات ملک را ارسال کنید.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+    
+    if text in ["/start", "شروع"]:
+        state.reset()
+        await update.message.reply_text(
+            "سلام! 👋\n\n"
+            "من ربات ثبت ملک هستم.\n"
+            "اطلاعات ملک را به هر شکلی که راحتید بفرستید.\n\n"
+            "مثال:\n"
+            "«آپارتمان ۱۲۰ متری در گلسار برای فروش»\n\n"
+            "یا می‌توانید ویس بفرستید 🎤",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+    
+    # --- اگر در مرحله تایید نهایی هستیم ---
+    if state.current_step == "confirmation":
+        await handle_confirmation_response(update, context, state, text)
+        return
+    
+    # --- اگر منتظر پاسخ به سوال خاصی هستیم ---
+    if state.waiting_for_field:
+        await handle_field_response(update, context, state, text)
+        return
+    
+    # --- استخراج اطلاعات از متن آزاد ---
+    await process_free_text(update, context, state, text)
+
+
+async def process_free_text(update: Update, context: ContextTypes.DEFAULT_TYPE, state: ConversationState, text: str):
+    """
+    پردازش متن آزاد و استخراج اطلاعات
+    """
+    user_id = update.effective_user.id
+    
+    try:
+        # استخراج اطلاعات با AI
+        extracted = await extract_property_info(text)
+        logger.info(f"[User {user_id}] Extracted: {extracted}")
+        
+        if not extracted or extracted.get("error"):
             await update.message.reply_text(
-                "✅ اطلاعات ملک با موفقیت ثبت شد!\nاز همکاری شما متشکریم.",
+                "⚠️ متوجه نشدم. لطفاً واضح‌تر بنویسید.\n\n"
+                "مثال: آپارتمان ۱۲۰ متری در گلسار برای فروش"
+            )
+            return
+        
+        # ادغام اطلاعات جدید با قبلی
+        for key, value in extracted.items():
+            if value is not None and value != "":
+                state.data[key] = value
+        
+        # نرمال‌سازی موقعیت
+        if extracted.get("neighborhood") or extracted.get("city"):
+            location_text = f"{extracted.get('neighborhood', '')} {extracted.get('city', '')}".strip()
+            if location_text:
+                try:
+                    loc = normalize_location(location_text)
+                    if loc.get("city"):
+                        state.data["city"] = loc["city"]
+                    if loc.get("neighborhood"):
+                        state.data["neighborhood"] = loc["neighborhood"]
+                except Exception as e:
+                    logger.warning(f"Location normalization failed: {e}")
+        
+        # اعمال قوانین و تعیین مرحله بعدی
+        result = apply_rules(state.data)
+        await send_response_with_keyboard(update, context, state, result)
+        
+    except Exception as e:
+        logger.error(f"[User {user_id}] Error in process_free_text: {e}", exc_info=True)
+        await update.message.reply_text(
+            "⚠️ خطایی رخ داد. لطفاً دوباره تلاش کنید."
+        )
+
+
+async def handle_field_response(update: Update, context: ContextTypes.DEFAULT_TYPE, state: ConversationState, text: str):
+    """
+    پردازش پاسخ به سوال خاص (مثلاً وقتی منتظر نوع معامله هستیم)
+    """
+    user_id = update.effective_user.id
+    field = state.waiting_for_field
+    
+    logger.info(f"[User {user_id}] Field response for '{field}': {text}")
+    
+    # تبدیل متن دکمه به مقدار سیستمی
+    value = normalize_button_input(text, field)
+    
+    # اعتبارسنجی مقدار
+    if field in ["area", "bedroom_count", "floor", "total_floors", "unit_count", "build_year"]:
+        int_value = text_to_int(text)
+        if int_value is None:
+            await update.message.reply_text(
+                "⚠️ لطفاً یک عدد معتبر وارد کنید.",
+                reply_markup=get_reply_keyboard(field) if has_keyboard(field) else ReplyKeyboardRemove()
+            )
+            return
+        state.data[field] = int_value
+    elif field in ["price_total", "rent"]:
+        int_value = text_to_int(text)
+        if int_value is None:
+            await update.message.reply_text(
+                "⚠️ لطفاً مبلغ را به‌صورت عددی وارد کنید.",
                 reply_markup=ReplyKeyboardRemove()
             )
-            clear_state(user_id)
             return
-
-        # Check for edit request
-        edit_handled = await handle_edit_request(user_id, text, update)
-        if edit_handled:
+        state.data[field] = int_value
+    elif field in ["has_elevator", "has_parking", "has_storage"]:
+        bool_value = normalize_yes_no(text)
+        if bool_value is None:
+            await update.message.reply_text(
+                "⚠️ لطفاً یکی از گزینه‌ها را انتخاب کنید.",
+                reply_markup=get_reply_keyboard(field)
+            )
             return
+        state.data[field] = bool_value
+    else:
+        state.data[field] = value
 
-        # Invalid input in confirmation mode
+    # پاک کردن وضعیت انتظار
+    state.waiting_for_field = None
+
+    # اعمال قوانین برای مرحله بعد
+    result = apply_rules(state.data)
+    await send_response_with_keyboard(update, context, state, result)
+
+
+async def handle_confirmation_response(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                       state: ConversationState, text: str):
+    """
+    پاسخ کاربر در مرحله تایید نهایی
+    """
+    action = normalize_button_input(text, "confirmation")
+
+    if action == "confirm":
+        summary = format_property_summary(state.data)
         await update.message.reply_text(
-            "لطفا یکی از موارد زیر را انتخاب کنید:\n"
-            "- برای تایید: 'بله' یا 'تایید'\n"
-            "- برای ویرایش: 'محله: گلسار' (فرمت: نام_فیلد: مقدار)"
+            "✅ ملک با موفقیت ثبت شد.\n\n" + summary,
+            reply_markup=ReplyKeyboardRemove()
+        )
+        state.reset()
+        return
+
+    if action == "edit":
+        await update.message.reply_text(
+            "✏️ لطفاً فیلدی که می‌خواهید ویرایش کنید ارسال کنید.\n"
+            "مثال:\n"
+            "متراژ: 130",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        state.current_step = "editing"
+        return
+
+    if action == "cancel":
+        state.reset()
+        await update.message.reply_text(
+            "❌ عملیات لغو شد.\nبرای شروع مجدد، اطلاعات ملک را ارسال کنید.",
+            reply_markup=ReplyKeyboardRemove()
         )
         return
 
-    # Extract with LLM
-    extracted = extract_json(text)
-    clean_text = text.strip().replace('"', "")
-    pending_field = get_pending_field(user_id)
-    val_int = text_to_int(clean_text)
+    await update.message.reply_text(
+        "⚠️ لطفاً یکی از گزینه‌ها را انتخاب کنید.",
+        reply_markup=get_reply_keyboard("confirmation")
+    )
 
-    # Context-Aware Processing
-    if pending_field:
-        # ✅ برای فیلدهای متنی خاص، نرمال‌سازی انجام بده
-        if pending_field == "transaction_type":
-            normalized = clean_text.lower().strip()
-            if normalized in ["اجاره", "رهن", "اجارە"]:
-                extracted[pending_field] = "رهن و اجاره"
-                logger.info(f"Context Fill: Set {pending_field} to رهن و اجاره")
-            elif normalized in ["فروش", "خرید"]:
-                extracted[pending_field] = "فروش"
-                logger.info(f"Context Fill: Set {pending_field} to فروش")
-            elif normalized in ["پیش فروش", "پیشفروش", "پیش‌فروش"]:
-                extracted[pending_field] = "پیش‌فروش"
-                logger.info(f"Context Fill: Set {pending_field} to پیش‌فروش")
 
-        elif pending_field == "property_type":
-            normalized = clean_text.lower().strip()
-            if normalized in ["آپارتمان", "اپارتمان"]:
-                extracted[pending_field] = "آپارتمان"
-            elif normalized in ["ویلا", "ویلایی"]:
-                extracted[pending_field] = "ویلا"
-            elif normalized in ["زمین"]:
-                extracted[pending_field] = "زمین"
-            elif normalized in ["مغازه", "غازه"]:
-                extracted[pending_field] = "مغازه"
+async def send_response_with_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                      state: ConversationState, result: dict):
+    """
+    ارسال پیام همراه با Reply Keyboard در صورت نیاز
+    """
+    if result.get("status") == "ask":
+        field = result.get("missing")
+        question = get_question_for_field(field)
 
-        elif pending_field in ["bedroom_count", "floor", "parking_count", "storage_count", "unit_count", "area", "total_floors", "build_year"]:
-            if val_int is not None:
-                extracted[pending_field] = val_int
-                logger.info(f"Context Fill: Set {pending_field} to {val_int}")
+        state.waiting_for_field = field
+        state.current_step = field
 
-        elif pending_field in ["price_total", "rent", "deposit", "price"]:
-            if val_int is not None:
-                extracted[pending_field] = val_int
-                logger.info(f"Context Fill: Set {pending_field} to {val_int}")
+        keyboard = get_reply_keyboard(field) if has_keyboard(field) else ReplyKeyboardRemove()
 
-        elif pending_field.startswith("has_"):
-            bool_val = normalize_yes_no(clean_text)
-            if bool_val is not None:
-                extracted[pending_field] = bool_val
-                logger.info(f"Context Fill: Set {pending_field} to {bool_val}")
+        await update.message.reply_text(
+            question,
+            reply_markup=keyboard
+        )
+        return
 
-        elif pending_field in ["owner_name", "neighborhood", "usage_type"]:
-            if val_int is None and 2 < len(clean_text) < 30:
-                extracted[pending_field] = clean_text
-                logger.info(f"Context Fill: Set {pending_field} to {clean_text}")
+    if result.get("status") == "confirm":
+        msg = format_confirmation_message(state.data)
+        state.current_step = "confirmation"
 
-        elif pending_field == "owner_phone":
-            normalized_phone = normalize_iran_phone(clean_text)
-            if normalized_phone:
-                extracted["owner_phone"] = normalized_phone
-                logger.info(f"Context Fill: Set owner_phone to {normalized_phone}")
-
-    # Normalize phone
-    if extracted.get("owner_phone"):
-        extracted["owner_phone"] = normalize_iran_phone(extracted["owner_phone"])
-
-    # Normalize prices
-    for price_k in ["price_total", "rent", "deposit"]:
-        if extracted.get(price_k):
-            extracted[price_k] = normalize_price(extracted[price_k])
-
-    # Validate area and floor
-    if extracted.get("area"):
-        validated_area = validate_area(extracted["area"])
-        extracted["area"] = validated_area if validated_area else extracted["area"]
-
-    if extracted.get("floor"):
-        validated_floor = validate_floor(extracted["floor"])
-        extracted["floor"] = validated_floor if validated_floor else extracted["floor"]
-
-    # Get current state
-    current_state = get_state(user_id)
-
-    # Prevent property_type override
-    if current_state.get("property_type") and extracted.get("property_type"):
-        logger.info(f"Ignoring new property_type, keeping: {current_state['property_type']}")
-        del extracted["property_type"]
-
-    # Inference Layer
-    if not extracted.get("property_type"):
-        extracted = infer_property_type(extracted)
-    if not extracted.get("usage_type"):
-        extracted = infer_usage_type(extracted)
-    extracted = normalize_location(extracted)
-
-    # Merge state
-    data = merge_state(user_id, extracted)
-    data["_user_id"] = user_id
-
-    # Rule engine
-    result = run_rule_engine(data)
-
-    if result["status"] == "completed":
-        set_confirmation_mode(user_id, True)
-        confirmation_msg = format_confirmation_message(data)
-        keyboard = [["تایید", "ویرایش"]]
-        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-        await update.message.reply_text(confirmation_msg, reply_markup=reply_markup)
-
-    elif result.get("question"):
-        # ✅ اگر فیلد جاری دکمه داشت، نمایش بده
-        pending = result.get("pending_field")
-        if pending and pending in KEYBOARD_OPTIONS:
-            keyboard = KEYBOARD_OPTIONS[pending]
-            reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-            await update.message.reply_text(result["question"], reply_markup=reply_markup)
-        else:
-            await update.message.reply_text(result["question"], reply_markup=ReplyKeyboardRemove())
-
-    else:
-        await update.message.reply_text("لطفا اطلاعات بیشتری ارسال کنید.", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(
+            msg,
+            reply_markup=get_reply_keyboard("confirmation")
+        )
+        return
