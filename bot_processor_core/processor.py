@@ -1,9 +1,8 @@
 # bot_processor_core/processor.py
-"""منطق اصلی پردازش متن"""
+"""پردازشگر اصلی متن با اعتبارسنجی ورودی"""
 
 import logging
-import re
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
 from extractor import extract_json
@@ -12,303 +11,300 @@ from rule_engine import run_rule_engine
 from conversation_state import (
     merge_state,
     get_pending_field,
+    set_pending_field,
     get_state,
     clear_state,
     set_confirmation_mode,
     is_confirmation_mode,
-    set_pending_field,
 )
-from services.inference_service import infer_property_type, infer_usage_type, normalize_location
-from utils import normalize_price
+from services.inference_service import (
+    infer_property_type,
+    infer_usage_type,
+    normalize_location,
+)
+from utils import normalize_price, validate_area, validate_floor
 from bot_utils import text_to_int, normalize_yes_no, format_confirmation_message
 
 from .constants import (
     KEYBOARD_OPTIONS,
-    NUMERIC_FIELDS,
+    FIELD_QUESTIONS,
     PRICE_FIELDS,
-    TEXT_FIELDS,
     FREE_TEXT_FIELDS,
+    NUMERIC_FIELDS,
+    BOOLEAN_FIELDS,
 )
 from .utils import (
     normalize_button_input,
-    is_button_input,
-    get_reply_keyboard,
     normalize_transaction_type,
     normalize_property_type,
     normalize_usage_type,
+    normalize_boolean_field,
+    get_reply_keyboard,
 )
-from .handlers import handle_edit_request
 
 logger = logging.getLogger(__name__)
 
 
-async def process_text(text: str, user_id: int, update: Update):
-    """Main text processing function"""
-    logger.info(f"INPUT from user {user_id}: {text}")
-
-    normalized_text = normalize_button_input(text)
-    clean_text = str(normalized_text).strip().replace('"', "")
-
-    # حالت تایید
-    if is_confirmation_mode(user_id):
-        await _handle_confirmation_mode(user_id, clean_text, normalized_text, text, update)
-        return
-
-    # استخراج با LLM
-    extracted = extract_json(text)
-    if extracted is None:
-        extracted = {}
-
-    pending_field = get_pending_field(user_id)
-    val_int = text_to_int(clean_text)
-
-    # پردازش ورودی
-    if is_button_input(text, normalized_text) and pending_field:
-        extracted[pending_field] = normalized_text
-        set_pending_field(user_id, None)
-        logger.info(f"Button Input: Set {pending_field} to {normalized_text}")
-    elif pending_field:
-        extracted = _process_pending_field(
-            pending_field, clean_text, val_int, extracted, text, user_id
-        )
-
-    # Inference
-    current_state = get_state(user_id)
-    extracted = _apply_inference(text, extracted, current_state)
-
-    # نرمال‌سازی
-    extracted = _normalize_extracted_data(extracted)
-
-    # ذخیره و Rule Engine
-    if extracted:
-        merge_state(user_id, extracted)
-        logger.info(f"Merged state for user {user_id}: {extracted}")
-
-    current_state = get_state(user_id)
-    current_state["_user_id"] = user_id
-    result = run_rule_engine(current_state)
-
-    logger.info(f"Rule Engine Result: {result}")
-
-    await _send_response_with_keyboard(result, update, user_id)
-
-
-async def _handle_confirmation_mode(
-    user_id: int, clean_text: str, normalized_text, original_text: str, update: Update
-):
-    """پردازش حالت تایید نهایی"""
-    current_state = get_state(user_id)
-
-    # تایید نهایی
-    if clean_text.lower() in ["تأیید", "بله", "اره", "آره", "ok", "yes", "تایید"] or normalized_text == "تایید":
-        await update.message.reply_text(
-            "✅ اطلاعات ملک با موفقیت ثبت شد!\n"
-            "🙏 از همکاری شما متشکریم.\n\n"
-            "برای ثبت ملک جدید، اطلاعات را ارسال کنید.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        clear_state(user_id)
-        return
-
-    # ویرایش
-    if clean_text == "ویرایش":
-        set_confirmation_mode(user_id, False)
-        await update.message.reply_text(
-            "✏️ فیلد مورد نظر را به این فرمت ارسال کنید:\n"
-            "مثال: متراژ: 120\n"
-            "یا: قیمت = 5 میلیارد",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return
-
-    # بررسی درخواست ویرایش مستقیم
-    edit_handled = await handle_edit_request(user_id, original_text, update)
-    if edit_handled:
-        return
-
-    # پیام راهنما
-    keyboard = ReplyKeyboardMarkup(
-        KEYBOARD_OPTIONS["confirmation"],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    await update.message.reply_text(
-        "لطفاً یکی از گزینه‌ها را انتخاب کنید:",
-        reply_markup=keyboard
-    )
-
-
-def _process_pending_field(
-    pending_field: str,
-    clean_text: str,
-    val_int: Optional[int],
-    extracted: Dict,
-    original_text: str,
-    user_id: int
-) -> Dict:
-    """پردازش مقدار فیلد در انتظار"""
-
-    # ✅ فیلدهای متنی آزاد - مهم‌ترین اصلاح
-    if pending_field in FREE_TEXT_FIELDS:
-        extracted[pending_field] = clean_text
-        set_pending_field(user_id, None)
-        logger.info(f"Free text field set: {pending_field} = {clean_text}")
-        return extracted
-
-    # نوع معامله
+def _validate_and_normalize_input(pending_field: str, text: str) -> Tuple[bool, Optional[any]]:
+    """
+    اعتبارسنجی و نرمال‌سازی ورودی بر اساس نوع فیلد
+    Returns: (is_valid, normalized_value)
+    """
+    clean_text = text.strip()
+    
+    # === فیلد نوع معامله ===
     if pending_field == "transaction_type":
-        value = normalize_transaction_type(clean_text)
-        extracted[pending_field] = value if value else clean_text
-        set_pending_field(user_id, None)
+        normalized = normalize_transaction_type(clean_text)
+        if normalized:
+            return True, normalized
+        # چک کردن ورودی‌های رایج
+        lower = clean_text.lower()
+        if any(k in lower for k in ["فروش", "خرید", "sell", "sale"]):
+            return True, "فروش"
+        if any(k in lower for k in ["رهن", "اجاره", "rent", "کرایه"]):
+            return True, "رهن و اجاره"
+        if any(k in lower for k in ["پیش", "presale"]):
+            return True, "پیش‌فروش"
+        return False, None
+    
+    # === فیلد نوع ملک ===
+    if pending_field == "property_type":
+        normalized = normalize_property_type(clean_text)
+        if normalized:
+            return True, normalized
+        return False, None
+    
+    # === فیلد نوع کاربری ===
+    if pending_field == "usage_type":
+        normalized = normalize_usage_type(clean_text)
+        if normalized:
+            return True, normalized
+        return False, None
+    
+    # === فیلدهای عددی ===
+    if pending_field in NUMERIC_FIELDS:
+        val = text_to_int(clean_text)
+        if val is not None and val > 0:
+            return True, val
+        return False, None
+    
+    # === فیلدهای قیمت ===
+    if pending_field in PRICE_FIELDS:
+        val = text_to_int(clean_text)
+        if val is not None and val > 0:
+            return True, val
+        # سعی کن با normalize_price
+        try:
+            normalized = normalize_price(clean_text)
+            if normalized and normalized > 0:
+                return True, normalized
+        except:
+            pass
+        return False, None
+    
+    # === فیلدهای بولی ===
+    if pending_field in BOOLEAN_FIELDS:
+        normalized = normalize_boolean_field(clean_text)
+        if normalized is not None:
+            return True, normalized
+        return False, None
+    
+    # === فیلد شماره تلفن ===
+    if pending_field == "owner_phone":
+        normalized = normalize_iran_phone(clean_text)
+        if normalized:
+            return True, normalized
+        return False, None
+    
+    # === فیلدهای متنی آزاد ===
+    if pending_field in FREE_TEXT_FIELDS:
+        # حداقل ۲ کاراکتر و حداکثر ۲۰۰ کاراکتر
+        if 2 <= len(clean_text) <= 200:
+            return True, clean_text
+        return False, None
+    
+    # === سایر فیلدها (مثل neighborhood, owner_name) ===
+    # حداقل ۲ کاراکتر و نباید عدد خالی باشد
+    if len(clean_text) >= 2:
+        # بررسی که فقط عدد نباشد (برای فیلدهای متنی)
+        if not clean_text.isdigit():
+            return True, clean_text
+    
+    return False, None
 
-    # نوع ملک
-    elif pending_field == "property_type":
-        value = normalize_property_type(clean_text)
-        extracted[pending_field] = value if value else clean_text
-        set_pending_field(user_id, None)
 
-    # نوع کاربری
-    elif pending_field == "usage_type":
-        value = normalize_usage_type(clean_text)
-        extracted[pending_field] = value if value else clean_text
-        set_pending_field(user_id, None)
+def _get_validation_error_message(pending_field: str) -> str:
+    """پیام خطای اعتبارسنجی برای هر فیلد"""
+    messages = {
+        "transaction_type": "❌ لطفاً یکی از گزینه‌ها را انتخاب کنید:\n• فروش\n• رهن و اجاره\n• پیش‌فروش",
+        "property_type": "❌ لطفاً نوع ملک را مشخص کنید:\n• آپارتمان\n• ویلا\n• زمین\n• مغازه",
+        "usage_type": "❌ لطفاً نوع کاربری را مشخص کنید:\n• مسکونی\n• تجاری\n• اداری",
+        "area": "❌ لطفاً متراژ را به عدد وارد کنید (مثال: 120)",
+        "bedroom_count": "❌ لطفاً تعداد اتاق خواب را به عدد وارد کنید (مثال: 2)",
+        "floor": "❌ لطفاً شماره طبقه را به عدد وارد کنید (مثال: 3)",
+        "total_floors": "❌ لطفاً تعداد کل طبقات را به عدد وارد کنید (مثال: 5)",
+        "unit_count": "❌ لطفاً تعداد واحد در طبقه را به عدد وارد کنید (مثال: 2)",
+        "build_year": "❌ لطفاً سال ساخت را وارد کنید (مثال: 1402)",
+        "price_total": "❌ لطفاً قیمت را به عدد وارد کنید (مثال: 5000000000 یا ۵ میلیارد)",
+        "rent": "❌ لطفاً مبلغ اجاره را به عدد وارد کنید",
+        "deposit": "❌ لطفاً مبلغ ودیعه را به عدد وارد کنید",
+        "mortgage": "❌ لطفاً مبلغ رهن را به عدد وارد کنید",
+        "has_elevator": "❌ لطفاً با 'بله' یا 'خیر' پاسخ دهید",
+        "has_parking": "❌ لطفاً با 'بله' یا 'خیر' پاسخ دهید",
+        "has_storage": "❌ لطفاً با 'بله' یا 'خیر' پاسخ دهید",
+        "owner_phone": "❌ لطفاً شماره تلفن معتبر وارد کنید (مثال: 09121234567)",
+        "owner_name": "❌ لطفاً نام مالک را وارد کنید (حداقل ۲ حرف)",
+        "neighborhood": "❌ لطفاً نام محله را وارد کنید",
+    }
+    return messages.get(pending_field, "❌ ورودی نامعتبر است. لطفاً دوباره تلاش کنید.")
 
-    # فیلدهای عددی
-    elif pending_field in NUMERIC_FIELDS:
-        if val_int is not None:
-            extracted[pending_field] = val_int
+
+async def _process_pending_field(
+    user_id: int,
+    text: str,
+    pending_field: str,
+    extracted: Dict,
+    update: Update
+) -> bool:
+    """
+    پردازش ورودی برای فیلد pending با اعتبارسنجی
+    Returns: True if handled, False otherwise
+    """
+    # ابتدا ورودی دکمه را نرمال‌سازی کن
+    normalized_button = normalize_button_input(text)
+    
+    # اعتبارسنجی ورودی
+    is_valid, normalized_value = _validate_and_normalize_input(pending_field, normalized_button)
+    
+    if not is_valid:
+        # ورودی نامعتبر - پیام خطا بده و سوال را تکرار کن
+        error_msg = _get_validation_error_message(pending_field)
+        question = FIELD_QUESTIONS.get(pending_field, "لطفاً مقدار معتبر وارد کنید:")
+        
+        keyboard = get_reply_keyboard(pending_field)
+        full_message = f"{error_msg}\n\n{question}"
+        
+        if keyboard:
+            await update.message.reply_text(full_message, reply_markup=keyboard)
         else:
-            numbers = re.findall(r'\d+', clean_text)
-            if numbers:
-                extracted[pending_field] = int(numbers[0])
-            else:
-                extracted[pending_field] = clean_text
-        set_pending_field(user_id, None)
-
-    # فیلدهای قیمت
-    elif pending_field in PRICE_FIELDS:
-        normalized = normalize_price(clean_text)
-        extracted[pending_field] = normalized if normalized else clean_text
-        set_pending_field(user_id, None)
-
-    # فیلدهای بله/خیر
-    elif pending_field.startswith("has_"):
-        yes_no = normalize_yes_no(clean_text)
-        if yes_no is not None:
-            extracted[pending_field] = yes_no
-        else:
-            extracted[pending_field] = clean_text.lower() in [
-                "بله", "دارد", "داره", "اره", "آره", "yes", "true"
-            ]
-        set_pending_field(user_id, None)
-
-    # شماره تلفن
-    elif pending_field == "owner_phone":
-        phone = normalize_iran_phone(clean_text)
-        extracted[pending_field] = phone if phone else clean_text
-        set_pending_field(user_id, None)
-
-    # فیلدهای متنی عمومی
-    elif pending_field in TEXT_FIELDS:
-        extracted[pending_field] = clean_text
-        set_pending_field(user_id, None)
-
-    # سایر فیلدها
-    else:
-        extracted[pending_field] = clean_text
-        set_pending_field(user_id, None)
-        logger.info(f"Generic field set: {pending_field} = {clean_text}")
-
-    return extracted
+            await update.message.reply_text(full_message, reply_markup=ReplyKeyboardRemove())
+        
+        return True  # پردازش شد (با خطا)
+    
+    # ورودی معتبر - ذخیره کن
+    extracted[pending_field] = normalized_value
+    logger.info(f"✅ Valid input for {pending_field}: {normalized_value}")
+    
+    # پاک کردن pending field
+    set_pending_field(user_id, None)
+    
+    return False  # ادامه پردازش عادی
 
 
-def _apply_inference(text: str, extracted: Dict, current_state: Dict) -> Dict:
-    """اعمال استنتاج هوشمند"""
-
-    # استنتاج نوع ملک
+async def process_text(text: str, user_id: int, update: Update):
+    """تابع اصلی پردازش متن"""
+    logger.info(f"INPUT from user {user_id}: {text}")
+    
+    # === حالت تایید ===
+    if is_confirmation_mode(user_id):
+        return await _handle_confirmation_mode(user_id, text, update)
+    
+    # === استخراج با LLM ===
+    extracted = extract_json(text) or {}
+    
+    # === پردازش فیلد pending ===
+    pending_field = get_pending_field(user_id)
+    
+    if pending_field:
+        handled = await _process_pending_field(
+            user_id, text, pending_field, extracted, update
+        )
+        if handled:
+            return  # خطای اعتبارسنجی - منتظر ورودی جدید
+    
+    # === نرمال‌سازی داده‌ها ===
+    extracted = _normalize_extracted_data(extracted)
+    
+    # === ادغام با state ===
+    current_state = get_state(user_id)
+    
+    # جلوگیری از بازنویسی property_type
+    if current_state.get("property_type") and extracted.get("property_type"):
+        del extracted["property_type"]
+    
+    # === Inference ===
     if not extracted.get("property_type") and not current_state.get("property_type"):
-        inferred = infer_property_type({"raw_text": text})
-        if inferred and inferred.get("property_type"):
-            extracted["property_type"] = inferred["property_type"]
-
-    # استنتاج نوع کاربری
+        extracted = infer_property_type(extracted)
     if not extracted.get("usage_type") and not current_state.get("usage_type"):
-        inferred = infer_usage_type({"raw_text": text})
-        if inferred and inferred.get("usage_type"):
-            extracted["usage_type"] = inferred["usage_type"]
-
-    # نرمال‌سازی موقعیت
-    location_data = {**current_state, **extracted}
-    normalized_location = normalize_location(location_data)
-    if normalized_location.get("neighborhood"):
-        extracted["neighborhood"] = normalized_location["neighborhood"]
-    if normalized_location.get("city"):
-        extracted["city"] = normalized_location["city"]
-
-    return extracted
+        extracted = infer_usage_type(extracted)
+    extracted = normalize_location(extracted)
+    
+    # === ادغام state ===
+    data = merge_state(user_id, extracted)
+    data["_user_id"] = user_id
+    logger.info(f"Merged state for user {user_id}: {data}")
+    
+    # === Rule Engine ===
+    result = run_rule_engine(data)
+    logger.info(f"Rule Engine Result: {result}")
+    
+    # === پاسخ به کاربر ===
+    if result["status"] == "completed":
+        set_confirmation_mode(user_id, True)
+        confirmation_msg = format_confirmation_message(data)
+        keyboard = ReplyKeyboardMarkup(
+            [["✅ تایید", "✏️ ویرایش"]],
+            one_time_keyboard=True,
+            resize_keyboard=True
+        )
+        await update.message.reply_text(confirmation_msg, reply_markup=keyboard)
+    
+    elif result.get("question"):
+        pending = result.get("pending_field", result.get("missing"))
+        keyboard = get_reply_keyboard(pending)
+        
+        if keyboard:
+            await update.message.reply_text(result["question"], reply_markup=keyboard)
+        else:
+            await update.message.reply_text(result["question"], reply_markup=ReplyKeyboardRemove())
+    
+    else:
+        await update.message.reply_text(
+            "لطفاً اطلاعات ملک خود را ارسال کنید.",
+            reply_markup=ReplyKeyboardRemove()
+        )
 
 
 def _normalize_extracted_data(extracted: Dict) -> Dict:
-    """نرمال‌سازی نهایی داده‌ها"""
-
-    # نرمال‌سازی قیمت‌ها
-    for field in PRICE_FIELDS:
-        if field in extracted and extracted[field]:
-            if isinstance(extracted[field], str):
-                normalized = normalize_price(extracted[field])
-                if normalized:
-                    extracted[field] = normalized
-
+    """نرمال‌سازی داده‌های استخراج شده"""
+    
     # نرمال‌سازی شماره تلفن
-    if "owner_phone" in extracted and extracted["owner_phone"]:
-        phone = normalize_iran_phone(str(extracted["owner_phone"]))
-        if phone:
-            extracted["owner_phone"] = phone
-
-    # حذف مقادیر خالی
-    extracted = {k: v for k, v in extracted.items() if v is not None and v != ""}
-
+    if extracted.get("owner_phone"):
+        extracted["owner_phone"] = normalize_iran_phone(extracted["owner_phone"])
+    
+    # نرمال‌سازی قیمت‌ها
+    for price_key in PRICE_FIELDS:
+        if extracted.get(price_key):
+            try:
+                extracted[price_key] = normalize_price(extracted[price_key])
+            except:
+                pass
+    
+    # اعتبارسنجی متراژ
+    if extracted.get("area"):
+        validated = validate_area(extracted["area"])
+        if validated:
+            extracted["area"] = validated
+    
+    # اعتبارسنجی طبقه
+    if extracted.get("floor"):
+        validated = validate_floor(extracted["floor"])
+        if validated:
+            extracted["floor"] = validated
+    
     return extracted
 
 
-async def _send_response_with_keyboard(result: Dict, update: Update, user_id: int):
-    """ارسال پاسخ همراه با کیبورد مناسب"""
-
-    message = result.get("message", "")
-    next_field = result.get("next_field")
-    complete = result.get("complete", False)
-
-    # حالت تکمیل - نمایش خلاصه و تایید
-    if complete:
-        current_state = get_state(user_id)
-        confirmation_msg = format_confirmation_message(current_state)
-        keyboard = ReplyKeyboardMarkup(
-            KEYBOARD_OPTIONS["confirmation"],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
-        await update.message.reply_text(
-            f"📋 خلاصه اطلاعات ملک:\n\n{confirmation_msg}\n\n"
-            "آیا اطلاعات صحیح است؟",
-            reply_markup=keyboard
-        )
-        set_confirmation_mode(user_id, True)
-        return
-
-    # سوال بعدی با کیبورد مناسب
-    if next_field:
-        set_pending_field(user_id, next_field)
-        keyboard = get_reply_keyboard(next_field)
-
-        if keyboard:
-            await update.message.reply_text(message, reply_markup=keyboard)
-        else:
-            await update.message.reply_text(
-                message,
-                reply_markup=ReplyKeyboardRemove()
-            )
-        return
-
-    # پیام ساده بدون کیبورد
-    if message:
-        await update.message.reply_text(message, reply_markup=ReplyKeyboardRemove())
+async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
+    """پردازش در حالت تایید"""
+    current
