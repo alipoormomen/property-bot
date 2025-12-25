@@ -1,221 +1,218 @@
-# rule_engine.py - Business Rules for Property Bot
+# -------------------------------------------------
+# rule_engine.py (FINAL VERSION - بدون سوال شهر)
+# ✅ شهر کلاً پرسیده نمی‌شود - فقط محله و سپس آدرس
+# -------------------------------------------------
+
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Optional
+from conversation_state import set_pending_field
 
 logger = logging.getLogger(__name__)
 
-# فیلدهای اجباری بر اساس نوع معامله
-REQUIRED_FIELDS = {
-    "Sale": ["transaction_type", "property_type", "area", "location", "price"],
-    "Rent": ["transaction_type", "property_type", "area", "location", "rent_price"],
-    "Mortgage": ["transaction_type", "property_type", "area", "location", "mortgage_amount"],
-    "default": ["transaction_type", "property_type", "area", "location"]
-}
-
-# فیلدهای اختیاری
-OPTIONAL_FIELDS = ["rooms", "floor", "building_age", "parking", "elevator", "storage", "description"]
-
-# ترجمه فیلدها به فارسی
-FIELD_LABELS = {
-    "transaction_type": "نوع معامله",
-    "property_type": "نوع ملک",
-    "area": "متراژ",
-    "location": "موقعیت",
-    "price": "قیمت فروش",
-    "rent_price": "اجاره ماهانه",
-    "mortgage_amount": "مبلغ رهن",
-    "rooms": "تعداد اتاق",
-    "floor": "طبقه",
-    "building_age": "سن بنا",
-    "parking": "پارکینگ",
-    "elevator": "آسانسور",
-    "storage": "انباری",
-    "description": "توضیحات"
-}
-
-
-def apply_rules(data: Dict[str, Any]) -> Dict[str, Any]:
+def run_rule_engine(data: Dict) -> Dict:
     """
-    اعمال قوانین کسب‌وکار روی داده‌ها
-    
-    Returns:
-        {
-            "status": "complete" | "ask" | "invalid",
-            "missing_fields": [...],
-            "next_field": "field_name" or None,
-            "message": "...",
-            "data": {...}
+    ✅ Rule Engine نهایی - بدون سوال شهر
+    Flow: Transaction → Type → [Details] → Specs → Price → Neighborhood → Address → Owner
+    """
+    user_id = data.get("_user_id")
+
+    # ============================================
+    # 1️⃣ نوع معامله
+    # ============================================
+    if data.get("transaction_type") is None:
+        set_pending_field(user_id, "transaction_type")
+        return {
+            "status": "ask",
+            "missing": "transaction_type",
+            "question": "🏷 قصد چه کاری دارید؟ (فروش / رهن و اجاره)",
         }
-    """
-    result = {
-        "status": "complete",
-        "missing_fields": [],
-        "next_field": None,
-        "message": "",
-        "data": data.copy()
-    }
-    
-    # تعیین فیلدهای اجباری بر اساس نوع معامله
-    transaction_type = data.get("transaction_type", "")
-    required = REQUIRED_FIELDS.get(transaction_type, REQUIRED_FIELDS["default"])
-    
-    # بررسی فیلدهای گمشده
-    missing = []
-    for field in required:
-        if not data.get(field):
-            missing.append(field)
-    
-    if missing:
-        result["status"] = "ask"
-        result["missing_fields"] = missing
-        result["next_field"] = missing[0]
-        
-        # پیام برای فیلد بعدی
-        field_label = FIELD_LABELS.get(missing[0], missing[0])
-        result["message"] = f"لطفاً {field_label} را مشخص کنید:"
+
+    # ============================================
+    # 2️⃣ نوع ملک
+    # ============================================
+    if data.get("property_type") is None:
+        set_pending_field(user_id, "property_type")
+        return {
+            "status": "ask",
+            "missing": "property_type",
+            "question": "🏠 نوع ملک چیست؟ (آپارتمان، ویلا، زمین، مغازه)",
+        }
+
+    # ============================================
+    # 3️⃣ سوالات ویژه آپارتمان
+    # ============================================
+    if data.get("property_type") in ["آپارتمان", "Apartment", "اپارتمان"]:
+
+        # 3.1 نوع کاربری
+        if data.get("usage_type") is None:
+            set_pending_field(user_id, "usage_type")
+            return {
+                "status": "ask",
+                "missing": "usage_type",
+                "question": "🏢 نوع کاربری چیست؟ (مسکونی / تجاری / اداری)",
+            }
+
+        # 3.2 متراژ
+        if data.get("area") is None:
+            set_pending_field(user_id, "area")
+            return {
+                "status": "ask",
+                "missing": "area",
+                "question": "📐 متراژ ملک چقدر است؟",
+            }
+
+        # 3.3 تعداد اتاق خواب (فقط مسکونی)
+        if data.get("usage_type") in ["مسکونی", "Residential"]:
+            if data.get("bedroom_count") is None:
+                set_pending_field(user_id, "bedroom_count")
+                return {
+                    "status": "ask",
+                    "missing": "bedroom_count",
+                    "question": "🛏 چند خواب دارد؟",
+                }
+
+        # 3.4 تعداد کل طبقات ساختمان
+        if data.get("total_floors") is None:
+            set_pending_field(user_id, "total_floors")
+            return {
+                "status": "ask",
+                "missing": "total_floors",
+                "question": "🏢 ساختمان چند طبقه است؟",
+            }
+
+        # 3.5 واحد در کدام طبقه
+        if data.get("floor") is None:
+            set_pending_field(user_id, "floor")
+            return {
+                "status": "ask",
+                "missing": "floor",
+                "question": "📍 واحد در چه طبقه‌ای است؟",
+            }
+
+        # 3.6 تعداد واحد در هر طبقه
+        if data.get("unit_count") is None:
+            set_pending_field(user_id, "unit_count")
+            return {
+                "status": "ask",
+                "missing": "unit_count",
+                "question": "🚪 هر طبقه چند واحد دارد؟",
+            }
+
+        # 3.7 آسانسور
+        if data.get("has_elevator") is None:
+            set_pending_field(user_id, "has_elevator")
+            return {
+                "status": "ask",
+                "missing": "has_elevator",
+                "question": "🛗 آسانسور دارد؟ (بله / خیر)",
+            }
+
+        # 3.8 سال ساخت
+        if data.get("build_year") is None:
+            set_pending_field(user_id, "build_year")
+            return {
+                "status": "ask",
+                "missing": "build_year",
+                "question": "📅 سال ساخت چه سالی است؟ (مثلاً 1402 یا نوساز)",
+            }
+
+    # ============================================
+    # 4️⃣ سوالات عمومی (ویلا، زمین، مغازه)
+    # ============================================
     else:
-        result["status"] = "complete"
-        result["message"] = "اطلاعات کامل است."
-    
-    return result
+        # متراژ
+        if data.get("area") is None:
+            set_pending_field(user_id, "area")
+            return {
+                "status": "ask",
+                "missing": "area",
+                "question": "📐 متراژ ملک چقدر است؟",
+            }
 
+        # برای ویلا: تعداد خواب
+        if data.get("property_type") in ["ویلا", "Villa", "ویلایی"]:
+            if data.get("bedroom_count") is None:
+                set_pending_field(user_id, "bedroom_count")
+                return {
+                    "status": "ask",
+                    "missing": "bedroom_count",
+                    "question": "🛏 ویلا چند خواب دارد؟",
+                }
 
-def validate_field(field_name: str, value: Any) -> Dict[str, Any]:
-    """
-    اعتبارسنجی یک فیلد خاص
-    
-    Returns:
-        {"valid": True/False, "message": "...", "normalized_value": ...}
-    """
-    result = {"valid": True, "message": "", "normalized_value": value}
-    
-    if field_name == "area":
-        try:
-            area = int(str(value).replace("متر", "").replace("مربع", "").strip())
-            if area < 10 or area > 10000:
-                result["valid"] = False
-                result["message"] = "متراژ باید بین ۱۰ تا ۱۰۰۰۰ متر باشد."
-            else:
-                result["normalized_value"] = area
-        except ValueError:
-            result["valid"] = False
-            result["message"] = "لطفاً متراژ را به عدد وارد کنید."
-    
-    elif field_name == "price" or field_name == "rent_price" or field_name == "mortgage_amount":
-        try:
-            # حذف کاراکترهای اضافی
-            price_str = str(value).replace(",", "").replace("تومان", "").replace("میلیون", "000000").replace("میلیارد", "000000000").strip()
-            price = int(price_str)
-            if price < 0:
-                result["valid"] = False
-                result["message"] = "قیمت نمی‌تواند منفی باشد."
-            else:
-                result["normalized_value"] = price
-        except ValueError:
-            result["valid"] = False
-            result["message"] = "لطفاً قیمت را به عدد وارد کنید."
-    
-    elif field_name == "rooms":
-        try:
-            rooms = int(value)
-            if rooms < 0 or rooms > 20:
-                result["valid"] = False
-                result["message"] = "تعداد اتاق باید بین ۰ تا ۲۰ باشد."
-            else:
-                result["normalized_value"] = rooms
-        except ValueError:
-            result["valid"] = False
-            result["message"] = "لطفاً تعداد اتاق را به عدد وارد کنید."
-    
-    elif field_name == "floor":
-        try:
-            floor = int(str(value).replace("طبقه", "").strip())
-            if floor < -2 or floor > 100:
-                result["valid"] = False
-                result["message"] = "طبقه باید بین -۲ تا ۱۰۰ باشد."
-            else:
-                result["normalized_value"] = floor
-        except ValueError:
-            result["valid"] = False
-            result["message"] = "لطفاً طبقه را به عدد وارد کنید."
-    
-    return result
+    # ============================================
+    # 5️⃣ قیمت
+    # ============================================
+    if data.get("transaction_type") in ["فروش", "Sale", "پیش‌فروش"]:
+        if data.get("price_total") is None and data.get("price") is None:
+            set_pending_field(user_id, "price_total")
+            return {
+                "status": "ask",
+                "missing": "price_total",
+                "question": "💰 قیمت کل چقدر است؟",
+            }
 
+    if data.get("transaction_type") in ["رهن و اجاره", "Rent", "اجاره", "رهن"]:
+        if data.get("price_total") is None:
+            set_pending_field(user_id, "price_total")
+            return {
+                "status": "ask",
+                "missing": "price_total",
+                "question": "💰 مبلغ رهن (ودیعه) چقدر است؟",
+            }
+        if data.get("rent") is None:
+            set_pending_field(user_id, "rent")
+            return {
+                "status": "ask",
+                "missing": "rent",
+                "question": "💵 اجاره ماهیانه چقدر است؟",
+            }
 
-def get_missing_fields(data: Dict[str, Any]) -> List[str]:
-    """دریافت لیست فیلدهای گمشده"""
-    transaction_type = data.get("transaction_type", "")
-    required = REQUIRED_FIELDS.get(transaction_type, REQUIRED_FIELDS["default"])
-    
-    missing = []
-    for field in required:
-        if not data.get(field):
-            missing.append(field)
-    
-    return missing
+    # ============================================
+    # 6️⃣ محله (بدون سوال شهر!)
+    # ============================================
+    if data.get("neighborhood") is None:
+        set_pending_field(user_id, "neighborhood")
+        return {
+            "status": "ask",
+            "missing": "neighborhood",
+            "question": "📍 ملک در کدام محله/منطقه است؟",
+        }
 
+    # ============================================
+    # 7️⃣ آدرس دقیق (جدید - بعد از محله)
+    # ============================================
+    if data.get("address") is None:
+        set_pending_field(user_id, "address")
+        return {
+            "status": "ask",
+            "missing": "address",
+            "question": "🏠 آدرس دقیق ملک را وارد کنید:\n(مثال: رشت، گلسار، خیابان ۱۰۷)",
+        }
 
-def get_next_question(data: Dict[str, Any]) -> Optional[Dict[str, str]]:
-    """
-    دریافت سوال بعدی برای پرسیدن
-    
-    Returns:
-        {"field": "field_name", "question": "سوال به فارسی"} or None
-    """
-    missing = get_missing_fields(data)
-    
-    if not missing:
-        return None
-    
-    field = missing[0]
-    questions = {
-        "transaction_type": "نوع معامله چیست؟ (فروش/اجاره/رهن)",
-        "property_type": "نوع ملک چیست؟ (آپارتمان/ویلا/زمین/مغازه)",
-        "area": "متراژ ملک چند متر است؟",
-        "location": "موقعیت ملک کجاست؟ (شهر و محله)",
-        "price": "قیمت فروش چقدر است؟",
-        "rent_price": "اجاره ماهانه چقدر است؟",
-        "mortgage_amount": "مبلغ رهن چقدر است؟",
-        "rooms": "چند اتاق خواب دارد؟",
-        "floor": "طبقه چندم است؟"
-    }
-    
+    # ============================================
+    # 8️⃣ اطلاعات مالک
+    # ============================================
+    if data.get("owner_name") is None:
+        set_pending_field(user_id, "owner_name")
+        return {
+            "status": "ask",
+            "missing": "owner_name",
+            "question": "👤 نام شریف شما؟",
+        }
+
+    if data.get("owner_phone") is None:
+        set_pending_field(user_id, "owner_phone")
+        return {
+            "status": "ask",
+            "missing": "owner_phone",
+            "question": "📞 لطفاً شماره تماس خود را وارد کنید:",
+        }
+
+    # ============================================
+    # ✅ تکمیل شد!
+    # ============================================
+    set_pending_field(user_id, None)
     return {
-        "field": field,
-        "question": questions.get(field, f"لطفاً {FIELD_LABELS.get(field, field)} را وارد کنید:")
+        "status": "completed",
+        "message": "✅ اطلاعات کامل شد."
     }
-
-
-def format_summary(data: Dict[str, Any]) -> str:
-    """فرمت‌بندی خلاصه اطلاعات ملک"""
-    lines = ["📋 **خلاصه اطلاعات ملک:**", ""]
-    
-    field_order = [
-        "transaction_type", "property_type", "area", "location",
-        "price", "rent_price", "mortgage_amount",
-        "rooms", "floor", "building_age",
-        "parking", "elevator", "storage", "description"
-    ]
-    
-    for field in field_order:
-        value = data.get(field)
-        if value:
-            label = FIELD_LABELS.get(field, field)
-            
-            # فرمت‌بندی مقادیر خاص
-            if field == "area":
-                value = f"{value} متر مربع"
-            elif field in ["price", "rent_price", "mortgage_amount"]:
-                value = f"{value:,} تومان"
-            elif field in ["parking", "elevator", "storage"]:
-                value = "دارد ✅" if value else "ندارد ❌"
-            
-            lines.append(f"• **{label}:** {value}")
-    
-    return "\n".join(lines)
-
-
-def is_complete(data: Dict[str, Any]) -> bool:
-    """بررسی کامل بودن اطلاعات"""
-    missing = get_missing_fields(data)
-    return len(missing) == 0
