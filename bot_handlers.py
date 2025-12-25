@@ -4,12 +4,11 @@ from telegram import Update, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 
 from stt import voice_to_text
-from bot_processor import process_text
+from bot_processor import process_message
 from conversation_state import clear_state
 
 logger = logging.getLogger(__name__)
 
-# ✅ پیام استارت جدید
 START_MESSAGE = """👋 سلام! برای ثبت ملک خود، اطلاعات را صوتی 🎤 یا متنی⌨️ ارسال کنید.
 
 ---
@@ -24,13 +23,11 @@ START_MESSAGE = """👋 سلام! برای ثبت ملک خود، اطلاعات
 برای آپارتمان، سوالات تکمیلی دیگری نیز پرسیده می‌شود."""
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command"""
     user_id = update.effective_user.id
     clear_state(user_id)
     await update.message.reply_text(START_MESSAGE, reply_markup=ReplyKeyboardRemove())
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle voice messages"""
     if not update.message.voice:
         return
 
@@ -41,15 +38,14 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = await voice_to_text(file)
 
         if text:
-            await process_text(text, update.effective_user.id, update)
+            await process_message(text, update.effective_user.id, update)
         else:
-            await update.message.reply_text("متاسفانه صدا نامفهوم بود. لطفا مجددا تلاش کنید.")
+            await update.message.reply_text("صدا نامفهوم بود. دوباره ارسال کنید.")
 
     except Exception as e:
         logger.error(f"Voice processing error: {e}")
-        await update.message.reply_text("خطا در پردازش صدا. لطفا مجددا تلاش کنید.")
+        await update.message.reply_text("خطا در پردازش صدا.")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text messages"""
     if update.message.text:
-        await process_text(update.message.text, update.effective_user.id, update)
+        await process_message(update.message.text, update.effective_user.id, update)
