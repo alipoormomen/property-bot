@@ -45,12 +45,19 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 
-def _validate_and_normalize_input(pending_field: str, text: str) -> Tuple[bool, Optional[any]]:
-    """
-    اعتبارسنجی و نرمال‌سازی ورودی بر اساس نوع فیلد
-    Returns: (is_valid, normalized_value)
-    """
+def _validate_and_normalize_input(pending_field: str, text) -> Tuple[bool, Optional[any]]:
+    """اعتبارسنجی و نرمال‌سازی ورودی"""
+    # اگر از قبل نرمال‌سازی شده (مثلاً بولی)، مستقیم برگردان
+    if isinstance(text, bool):
+        if pending_field in BOOLEAN_FIELDS:
+            return True, text
+        return False, None
+    
+    if not isinstance(text, str):
+        text = str(text)
+    
     clean_text = text.strip()
+
     
     # === فیلد نوع معامله ===
     if pending_field == "transaction_type":
