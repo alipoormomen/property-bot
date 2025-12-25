@@ -1,18 +1,15 @@
-# -------------------------------------------------
-# rule_engine.py (FINAL VERSION - بدون سوال شهر)
-# ✅ شهر کلاً پرسیده نمی‌شود - فقط محله و سپس آدرس
-# -------------------------------------------------
-
+# rule_engine.py - COMPLETE FIXED VERSION
 import logging
-from typing import Dict, Optional
+from typing import Dict
 from conversation_state import set_pending_field
 
 logger = logging.getLogger(__name__)
 
+
 def run_rule_engine(data: Dict) -> Dict:
     """
-    ✅ Rule Engine نهایی - بدون سوال شهر
-    Flow: Transaction → Type → [Details] → Specs → Price → Neighborhood → Address → Owner
+    Rule Engine با 8 مرحله کامل
+    Flow: Transaction → Type → Details → Price → Location → Owner → Features → Complete
     """
     user_id = data.get("_user_id")
 
@@ -22,7 +19,7 @@ def run_rule_engine(data: Dict) -> Dict:
     if data.get("transaction_type") is None:
         set_pending_field(user_id, "transaction_type")
         return {
-            "status": "ask",
+            "status": "question",
             "missing": "transaction_type",
             "question": "🏷 قصد چه کاری دارید؟ (فروش / رهن و اجاره)",
         }
@@ -33,7 +30,7 @@ def run_rule_engine(data: Dict) -> Dict:
     if data.get("property_type") is None:
         set_pending_field(user_id, "property_type")
         return {
-            "status": "ask",
+            "status": "question",
             "missing": "property_type",
             "question": "🏠 نوع ملک چیست؟ (آپارتمان، ویلا، زمین، مغازه)",
         }
@@ -41,100 +38,90 @@ def run_rule_engine(data: Dict) -> Dict:
     # ============================================
     # 3️⃣ سوالات ویژه آپارتمان
     # ============================================
-    if data.get("property_type") in ["آپارتمان", "Apartment", "اپارتمان"]:
+    if data.get("property_type") in ["آپارتمان", "Apartment"]:
 
-        # 3.1 نوع کاربری
         if data.get("usage_type") is None:
             set_pending_field(user_id, "usage_type")
             return {
-                "status": "ask",
+                "status": "question",
                 "missing": "usage_type",
                 "question": "🏢 نوع کاربری چیست؟ (مسکونی / تجاری / اداری)",
             }
 
-        # 3.2 متراژ
         if data.get("area") is None:
             set_pending_field(user_id, "area")
             return {
-                "status": "ask",
+                "status": "question",
                 "missing": "area",
                 "question": "📐 متراژ ملک چقدر است؟",
             }
 
-        # 3.3 تعداد اتاق خواب (فقط مسکونی)
         if data.get("usage_type") in ["مسکونی", "Residential"]:
             if data.get("bedroom_count") is None:
                 set_pending_field(user_id, "bedroom_count")
                 return {
-                    "status": "ask",
+                    "status": "question",
                     "missing": "bedroom_count",
                     "question": "🛏 چند خواب دارد؟",
                 }
 
-        # 3.4 تعداد کل طبقات ساختمان
         if data.get("total_floors") is None:
             set_pending_field(user_id, "total_floors")
             return {
-                "status": "ask",
+                "status": "question",
                 "missing": "total_floors",
                 "question": "🏢 ساختمان چند طبقه است؟",
             }
 
-        # 3.5 واحد در کدام طبقه
         if data.get("floor") is None:
             set_pending_field(user_id, "floor")
             return {
-                "status": "ask",
+                "status": "question",
                 "missing": "floor",
                 "question": "📍 واحد در چه طبقه‌ای است؟",
             }
 
-        # 3.6 تعداد واحد در هر طبقه
         if data.get("unit_count") is None:
             set_pending_field(user_id, "unit_count")
             return {
-                "status": "ask",
+                "status": "question",
                 "missing": "unit_count",
                 "question": "🚪 هر طبقه چند واحد دارد؟",
             }
 
-        # 3.7 آسانسور
         if data.get("has_elevator") is None:
             set_pending_field(user_id, "has_elevator")
             return {
-                "status": "ask",
+                "status": "question",
                 "missing": "has_elevator",
                 "question": "🛗 آسانسور دارد؟ (بله / خیر)",
             }
 
-        # 3.8 سال ساخت
         if data.get("build_year") is None:
             set_pending_field(user_id, "build_year")
             return {
-                "status": "ask",
+                "status": "question",
                 "missing": "build_year",
-                "question": "📅 سال ساخت چه سالی است؟ (مثلاً 1402 یا نوساز)",
+                "question": "📅 سال ساخت چه سالی است؟ (مثلاً 1402)",
             }
 
     # ============================================
     # 4️⃣ سوالات عمومی (ویلا، زمین، مغازه)
     # ============================================
     else:
-        # متراژ
         if data.get("area") is None:
             set_pending_field(user_id, "area")
             return {
-                "status": "ask",
+                "status": "question",
                 "missing": "area",
                 "question": "📐 متراژ ملک چقدر است؟",
             }
 
-        # برای ویلا: تعداد خواب
         if data.get("property_type") in ["ویلا", "Villa", "ویلایی"]:
             if data.get("bedroom_count") is None:
                 set_pending_field(user_id, "bedroom_count")
                 return {
-                    "status": "ask",
+                    "status": "question",
                     "missing": "bedroom_count",
                     "question": "🛏 ویلا چند خواب دارد؟",
                 }
@@ -146,56 +133,45 @@ def run_rule_engine(data: Dict) -> Dict:
         if data.get("price_total") is None and data.get("price") is None:
             set_pending_field(user_id, "price_total")
             return {
-                "status": "ask",
+                "status": "question",
                 "missing": "price_total",
                 "question": "💰 قیمت کل چقدر است؟",
             }
 
-    if data.get("transaction_type") in ["رهن و اجاره", "Rent", "اجاره", "رهن"]:
+    if data.get("transaction_type") in ["رهن و اجاره", "Rent", "اجاره"]:
         if data.get("price_total") is None:
             set_pending_field(user_id, "price_total")
             return {
-                "status": "ask",
+                "status": "question",
                 "missing": "price_total",
                 "question": "💰 مبلغ رهن (ودیعه) چقدر است؟",
             }
         if data.get("rent") is None:
             set_pending_field(user_id, "rent")
             return {
-                "status": "ask",
+                "status": "question",
                 "missing": "rent",
                 "question": "💵 اجاره ماهیانه چقدر است؟",
             }
 
     # ============================================
-    # 6️⃣ محله (بدون سوال شهر!)
+    # 6️⃣ محله/آدرس
     # ============================================
-    if data.get("neighborhood") is None:
+    if data.get("neighborhood") is None and data.get("city") is None:
         set_pending_field(user_id, "neighborhood")
         return {
-            "status": "ask",
+            "status": "question",
             "missing": "neighborhood",
             "question": "📍 ملک در کدام محله/منطقه است؟",
         }
 
     # ============================================
-    # 7️⃣ آدرس دقیق (جدید - بعد از محله)
-    # ============================================
-    if data.get("address") is None:
-        set_pending_field(user_id, "address")
-        return {
-            "status": "ask",
-            "missing": "address",
-            "question": "🏠 آدرس دقیق ملک را وارد کنید:\n(مثال: رشت، گلسار، خیابان ۱۰۷)",
-        }
-
-    # ============================================
-    # 8️⃣ اطلاعات مالک
+    # 7️⃣ اطلاعات مالک
     # ============================================
     if data.get("owner_name") is None:
         set_pending_field(user_id, "owner_name")
         return {
-            "status": "ask",
+            "status": "question",
             "missing": "owner_name",
             "question": "👤 نام شریف شما؟",
         }
@@ -203,16 +179,27 @@ def run_rule_engine(data: Dict) -> Dict:
     if data.get("owner_phone") is None:
         set_pending_field(user_id, "owner_phone")
         return {
-            "status": "ask",
+            "status": "question",
             "missing": "owner_phone",
             "question": "📞 لطفاً شماره تماس خود را وارد کنید:",
         }
 
     # ============================================
-    # ✅ تکمیل شد!
+    # 8️⃣ امکانات اضافی
+    # ============================================
+    if not data.get("additional_features_collected"):
+        set_pending_field(user_id, "additional_features")
+        return {
+            "status": "question",
+            "missing": "additional_features",
+            "question": "🏊 آیا امکانات خاصی دارد؟ (مثلا: لابی، استخر، سونا، نگهبان)\nاگر ندارد بنویسید: ندارد",
+        }
+
+    # ============================================
+    # ✅ تکمیل شد
     # ============================================
     set_pending_field(user_id, None)
     return {
         "status": "completed",
-        "message": "✅ اطلاعات کامل شد."
+        "message": "✅ اطلاعات کامل شد.",
     }
