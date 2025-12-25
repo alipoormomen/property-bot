@@ -43,45 +43,38 @@ FIELD_NAME_MAP = {
     "ویژگی": "additional_features",
 }
 
-
 async def handle_callback_query(update: Update, context=None):
-    """پردازش callback query از دکمه‌های inline"""
     query = update.callback_query
-    
     if not query:
         return
-    
+
     await query.answer()
-    
     user_id = query.from_user.id
     data = query.data
-    
+
     logger.info(f"Callback query from {user_id}: {data}")
-    
-    # پردازش بر اساس نوع callback
+
     if data.startswith("edit_"):
         field = data.replace("edit_", "")
         await query.message.reply_text(
-            f"✏️ مقدار جدید برای '{field}' را وارد کنید:"
+            f"✏️ مقدار جدید برای «{field}» را وارد کنید:"
         )
+
     elif data == "confirm":
         await query.message.reply_text(
             "✅ اطلاعات ملک ثبت شد!\n🙏 متشکریم."
         )
+
     elif data == "cancel":
         from conversation_state import clear_state
         clear_state(user_id)
-        await query.message.reply_text(
-            "❌ عملیات لغو شد."
-        )
+        await query.message.reply_text("❌ عملیات لغو شد.")
+
     else:
         logger.warning(f"Unknown callback data: {data}")
 
 
 async def handle_edit_request(user_id: int, text: str, update: Update) -> bool:
-    """پردازش درخواست ویرایش فیلد"""
-
-    # الگو: "فیلد: مقدار" یا "فیلد = مقدار"
     match = re.match(r'^(.+?)[:=]\s*(.+)$', text.strip())
     if not match:
         return False
@@ -89,10 +82,8 @@ async def handle_edit_request(user_id: int, text: str, update: Update) -> bool:
     field_name = match.group(1).strip()
     new_value = match.group(2).strip()
 
-    # پیدا کردن کلید فیلد
     field_key = FIELD_NAME_MAP.get(field_name)
     if not field_key:
-        # جستجوی تقریبی
         for name, key in FIELD_NAME_MAP.items():
             if field_name in name or name in field_name:
                 field_key = key
@@ -100,16 +91,14 @@ async def handle_edit_request(user_id: int, text: str, update: Update) -> bool:
 
     if not field_key:
         await update.message.reply_text(
-            f"❌ فیلد '{field_name}' شناسایی نشد.\n"
-            "لطفاً از نام‌های استاندارد استفاده کنید."
+            f"❌ فیلد «{field_name}» شناسایی نشد."
         )
         return True
 
-    # نرمال‌سازی مقدار
     if field_key in PRICE_FIELDS:
-        normalized = normalize_price(new_value)
-        if normalized:
-            new_value = normalized
+        nv = normalize_price(new_value)
+        if nv:
+            new_value = nv
 
     elif field_key == "owner_phone":
         phone = normalize_iran_phone(new_value)
@@ -117,20 +106,12 @@ async def handle_edit_request(user_id: int, text: str, update: Update) -> bool:
             new_value = phone
 
     elif field_key.startswith("has_"):
-        new_value = new_value.lower() in ["بله", "دارد", "داره", "آره", "اره", "yes", "true"]
+        new_value = new_value.lower() in ["بله", "دارد", "yes", "true"]
 
-    elif field_key in ["area", "rooms", "floor", "year_built"]:
-        try:
-            new_value = int(re.sub(r'\D', '', new_value))
-        except ValueError:
-            pass
-
-    # ذخیره مقدار جدید
     merge_state(user_id, {field_key: new_value})
 
-    # نمایش پیام تایید با اطلاعات به‌روز شده
     current_state = get_state(user_id)
-    confirmation_msg = format_confirmation_message(current_state)
+    msg = format_confirmation_message(current_state)
 
     keyboard = ReplyKeyboardMarkup(
         KEYBOARD_OPTIONS["confirmation"],
@@ -138,7 +119,7 @@ async def handle_edit_request(user_id: int, text: str, update: Update) -> bool:
     )
 
     await update.message.reply_text(
-        f"✅ '{field_name}' به‌روزرسانی شد.\n\n{confirmation_msg}",
+        f"✅ «{field_name}» ویرایش شد.\n\n{msg}",
         reply_markup=keyboard
     )
 
