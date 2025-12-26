@@ -106,9 +106,16 @@ async def handle_edit_request(user_id: int, text: str, update: Update) -> bool:
         return True
 
     if field_key in PRICE_FIELDS:
-        nv = normalize_price(new_value)
-        if nv:
-            new_value = nv
+        # ✅ اول سعی کن متن فارسی را تبدیل کنی
+        from bot_processor_core.processor import persian_text_to_number
+        persian_val = persian_text_to_number(new_value)
+        if persian_val:
+            new_value = persian_val
+        else:
+            nv = normalize_price(new_value)
+            if nv:
+                new_value = nv
+
 
     elif field_key == "owner_phone":
         phone = normalize_iran_phone(new_value)

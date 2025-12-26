@@ -47,71 +47,110 @@ logger = logging.getLogger(__name__)
 def persian_text_to_number(text: str) -> Optional[float]:
     """
     تبدیل متن فارسی قیمت به عدد
-    مثال: "پنجاه میلیارد تومان" -> 50,000,000,000
+    مثال: "چهار میلیارد و دویست میلیون تومان" -> 4,200,000,000
     """
     if not text:
         return None
-    
+
+    original_text = text
     text = text.strip().lower()
-    
+
     # اعداد فارسی به انگلیسی
     persian_digits = '۰۱۲۳۴۵۶۷۸۹'
     english_digits = '0123456789'
     for p, e in zip(persian_digits, english_digits):
         text = text.replace(p, e)
-    
-    # حذف "تومان" و "ریال"
-    text = text.replace('تومان', '').replace('ریال', '').replace('تومن', '').strip()
-    
+
+    # حذف "تومان" و "ریال" و کاراکترهای اضافی
+    text = text.replace('تومان', '').replace('ریال', '').replace('تومن', '')
+    text = text.replace('،', '').replace(',', '').strip()
+
     # اگر عدد مستقیم باشد
-    clean = text.replace(',', '').replace(' ', '').replace('،', '')
+    clean = text.replace(' ', '')
     try:
         return float(clean)
     except ValueError:
         pass
+
+    # === نرمال‌سازی کلمات ===
+    # اصلاح غلط‌های املایی رایج
+    text = text.replace('میلیادو', 'میلیارد و')
+    text = text.replace('میلیادی', 'میلیاردی')
+    text = text.replace('ملیارد', 'میلیارد')
+    text = text.replace('ملیون', 'میلیون')
+    text = text.replace('میلیونو', 'میلیون و')
+    text = text.replace('هزارو', 'هزار و')
     
     # کلمات عددی فارسی
     word_numbers = {
         'صفر': 0, 'یک': 1, 'یه': 1, 'دو': 2, 'سه': 3, 'چهار': 4,
-        'پنج': 5, 'شش': 6, 'هفت': 7, 'هشت': 8, 'نه': 9,
+        'پنج': 5, 'شش': 6, 'شیش': 6, 'هفت': 7, 'هشت': 8, 'نه': 9,
         'ده': 10, 'یازده': 11, 'دوازده': 12, 'سیزده': 13,
-        'چهارده': 14, 'پانزده': 15, 'شانزده': 16, 'هفده': 17,
-        'هجده': 18, 'نوزده': 19, 'بیست': 20, 'سی': 30,
-        'چهل': 40, 'پنجاه': 50, 'شصت': 60, 'هفتاد': 70,
-        'هشتاد': 80, 'نود': 90, 'صد': 100, 'دویست': 200,
-        'سیصد': 300, 'چهارصد': 400, 'پانصد': 500, 'ششصد': 600,
-        'هفتصد': 700, 'هشتصد': 800, 'نهصد': 900,
+        'چهارده': 14, 'پانزده': 15, 'پونزده': 15, 'شانزده': 16, 
+        'هفده': 17, 'هجده': 18, 'هیجده': 18, 'نوزده': 19,
+        'بیست': 20, 'سی': 30, 'چهل': 40, 'پنجاه': 50,
+        'شصت': 60, 'هفتاد': 70, 'هشتاد': 80, 'نود': 90,
+        'صد': 100, 'یکصد': 100, 'دویست': 200, 'سیصد': 300,
+        'چهارصد': 400, 'پانصد': 500, 'پونصد': 500,
+        'ششصد': 600, 'هفتصد': 700, 'هشتصد': 800, 'نهصد': 900,
     }
-    
-    # ضرایب
+
+    # ضرایب بزرگ
     multipliers = {
         'هزار': 1_000,
         'میلیون': 1_000_000,
-        'ملیون': 1_000_000,
         'میلیارد': 1_000_000_000,
-        'ملیارد': 1_000_000_000,
     }
+
+    # === الگوریتم پردازش ===
+    # جدا کردن با "و"
+    text = text.replace(' و ', ' ')
+    words = text.split()
+
+    total = 0
+    current_chunk = 0  # عدد فعلی قبل از ضریب
     
-    # تبدیل کلمات به عدد
-    result = 0
-    current = 0
-    
-    words = text.replace(' و ', ' ').split()
-    
-    for word in words:
-        word = word.strip()
+    i = 0
+    while i < len(words):
+        word = words[i].strip()
+        
+        if not word:
+            i += 1
+            continue
+        
+        # اگر عدد است
         if word in word_numbers:
-            current += word_numbers[word]
+            current_chunk += word_numbers[word]
+        
+        # اگر ضریب است
         elif word in multipliers:
-            if current == 0:
-                current = 1
-            current *= multipliers[word]
-            result += current
-            current = 0
+            multiplier = multipliers[word]
+            
+            if current_chunk == 0:
+                current_chunk = 1
+            
+            # ضرب در ضریب و اضافه به total
+            total += current_chunk * multiplier
+            current_chunk = 0
+        
+        # اگر عدد انگلیسی است
+        else:
+            try:
+                num = float(word)
+                current_chunk += num
+            except ValueError:
+                pass
+        
+        i += 1
+
+    # اضافه کردن باقیمانده
+    total += current_chunk
+
+    if total > 0:
+        logger.info(f"💰 persian_text_to_number: '{original_text}' -> {total:,.0f}")
+        return float(total)
     
-    result += current
-    
-    return float(result) if result > 0 else None
+    return None
 
 def _validate_and_normalize_input(pending_field: str, text) -> Tuple[bool, Optional[any]]:
     """اعتبارسنجی و نرمال‌سازی ورودی"""
@@ -120,19 +159,17 @@ def _validate_and_normalize_input(pending_field: str, text) -> Tuple[bool, Optio
         if pending_field in BOOLEAN_FIELDS:
             return True, text
         return False, None
-    
+
     if not isinstance(text, str):
         text = str(text)
-    
+
     clean_text = text.strip()
 
-    
     # === فیلد نوع معامله ===
     if pending_field == "transaction_type":
         normalized = normalize_transaction_type(clean_text)
         if normalized:
             return True, normalized
-        # چک کردن ورودی‌های رایج
         lower = clean_text.lower()
         if any(k in lower for k in ["فروش", "خرید", "sell", "sale"]):
             return True, "فروش"
@@ -141,40 +178,40 @@ def _validate_and_normalize_input(pending_field: str, text) -> Tuple[bool, Optio
         if any(k in lower for k in ["پیش", "presale"]):
             return True, "پیش‌فروش"
         return False, None
-    
+
     # === فیلد نوع ملک ===
     if pending_field == "property_type":
         normalized = normalize_property_type(clean_text)
         if normalized:
             return True, normalized
         return False, None
-    
+
     # === فیلد نوع کاربری ===
     if pending_field == "usage_type":
         normalized = normalize_usage_type(clean_text)
         if normalized:
             return True, normalized
         return False, None
-    
+
     # === فیلدهای عددی ===
     if pending_field in NUMERIC_FIELDS:
         val = text_to_int(clean_text)
         if val is not None and val > 0:
             return True, val
         return False, None
-    
+
     # === فیلدهای قیمت ===
     if pending_field in PRICE_FIELDS:
         # ✅ اول سعی کن متن فارسی را تبدیل کنی
         persian_val = persian_text_to_number(clean_text)
         if persian_val is not None and persian_val > 0:
             return True, persian_val
-        
+
         # سپس با text_to_int امتحان کن
         val = text_to_int(clean_text)
         if val is not None and val > 0:
             return True, val
-        
+
         # در نهایت با normalize_price
         try:
             normalized = normalize_price(clean_text)

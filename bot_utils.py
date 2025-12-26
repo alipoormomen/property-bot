@@ -190,7 +190,12 @@ def format_property_summary(data: Dict) -> str:
     else:
         # حالت فروش یا پیش‌فروش
         if data.get("price_total"):
-            lines.append(f"💰 قیمت کل: {data['price_total']:,.0f} تومان")
+            try:
+                price_val = float(data['price_total'])
+                lines.append(f"💰 قیمت کل: {price_val:,.0f} تومان")
+            except (ValueError, TypeError):
+                lines.append(f"💰 قیمت کل: {data['price_total']} تومان")
+
 
     
     if data.get("owner_name"):
