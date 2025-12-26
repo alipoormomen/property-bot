@@ -225,15 +225,25 @@ async def process_text(text: str, user_id: int, update: Update):
     # === اگر pending_field داریم، مقادیر متناقض LLM را نادیده بگیر ===
     if pending_field:
         # حذف مقادیری که LLM اشتباه استخراج کرده
-        conflicting_fields = ['price_total', 'rent', 'deposit', 'area', 'floor', 'bedroom_count', 'total_floors', 'unit_count', 'build_year']
+        numeric_fields = ['price_total', 'rent', 'deposit', 'area', 'floor', 'bedroom_count', 'total_floors', 'unit_count', 'build_year']
+        text_fields = ['owner_name', 'neighborhood', 'city']
+        
         fields_to_remove = []
-        for cf in conflicting_fields:
-            if cf in extracted and cf != pending_field:
+        for cf in extracted.keys():
+            if cf == pending_field:
+                continue  # فیلد مورد انتظار را حذف نکن
+            
+            # اگر فیلد عددی است و pending_field هم عددی است
+            if cf in numeric_fields:
+                fields_to_remove.append(cf)
+            # اگر فیلد متنی است و pending_field هم متنی است
+            elif cf in text_fields and pending_field in text_fields:
                 fields_to_remove.append(cf)
         
         for cf in fields_to_remove:
             logger.info(f"🚫 Ignoring LLM extraction of {cf}={extracted[cf]} while pending_field is {pending_field}")
             del extracted[cf]
+
         
         # پردازش ورودی pending
         handled = await _process_pending_field(
@@ -330,6 +340,7 @@ def _normalize_extracted_data(extracted: Dict) -> Dict:
 
 async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
     """مدیریت تایید یا ویرایش نهایی اطلاعات"""
+    from .handlers import handle_edit_request  # ✅ اضافه کنید
     
     clean_text = str(text).strip().replace("✅", "").replace("❌", "").replace("✏️", "").strip().lower()
     
@@ -344,17 +355,32 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
         clear_state(user_id)
         return
     
-    # ✏️ درخواست ویرایش
+    # ✏️ درخواست ویرایش (فقط دکمه)
     if clean_text == "ویرایش":
+        current_state = get_state(user_id)
+        summary = format_confirmation_message(current_state)
+        
+        keyboard = ReplyKeyboardMarkup(
+            KEYBOARD_OPTIONS["confirmation"],
+            resize_keyboard=True
+        )
+        
         await update.message.reply_text(
-            "✏️ برای ویرایش، فیلد را به این فرمت ارسال کنید:\n\n"
+            f"{summary}\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "✏️ برای ویرایش، فیلد را به این فرمت ارسال کنید:\n"
             "مثال:\n"
             "• متراژ: 120\n"
             "• قیمت: 5000000000\n"
             "• محله: گلسار",
-            reply_markup=ReplyKeyboardRemove()
+            reply_markup=keyboard
         )
         return
+    
+    # ✏️ پردازش درخواست ویرایش (مثلاً "متراژ: 120")
+    edit_handled = await handle_edit_request(user_id, text, update)
+    if edit_handled:
+        return  # ✅ ویرایش انجام شد و خلاصه نمایش داده شد
     
     # ❌ ورودی نامفهوم - نمایش دکمه‌ها
     keyboard = ReplyKeyboardMarkup(
@@ -366,4 +392,6 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
         "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
         reply_markup=keyboard
     )
+
+
 

@@ -20,28 +20,38 @@ FIELD_NAME_MAP = {
     "نوع ملک": "property_type",
     "کاربری": "usage_type",
     "متراژ": "area",
-    "اتاق": "rooms",
-    "خواب": "rooms",
-    "تعداد خواب": "rooms",
+    "اتاق": "bedroom_count",          # ✅ اصلاح شد
+    "خواب": "bedroom_count",           # ✅ اصلاح شد
+    "تعداد خواب": "bedroom_count",     # ✅ اصلاح شد
+    "اتاق خواب": "bedroom_count",      # ✅ اضافه شد
     "طبقه": "floor",
-    "قیمت": "price",
-    "قیمت کل": "price",
-    "رهن": "mortgage",
+    "قیمت": "price_total",             # ✅ اصلاح شد
+    "قیمت کل": "price_total",          # ✅ اصلاح شد
+    "رهن": "deposit",                  # ✅ اصلاح شد (رهن = ودیعه)
+    "ودیعه": "deposit",                # ✅ اضافه شد
     "اجاره": "rent",
     "محله": "neighborhood",
     "شهر": "city",
     "آدرس": "address",
     "نام مالک": "owner_name",
+    "مالک": "owner_name",              # ✅ اضافه شد
     "تلفن": "owner_phone",
     "شماره تماس": "owner_phone",
+    "شماره مالک": "owner_phone",       # ✅ اضافه شد
     "پارکینگ": "has_parking",
     "انباری": "has_storage",
     "آسانسور": "has_elevator",
     "بالکن": "has_balcony",
-    "سال ساخت": "year_built",
+    "سال ساخت": "build_year",          # ✅ اصلاح شد
     "توضیحات": "additional_features",
     "ویژگی": "additional_features",
+    "امکانات": "additional_features",  # ✅ اضافه شد - این خط مهم است!
+    "ویژگی‌ها": "additional_features", # ✅ اضافه شد
+    "تعداد طبقات": "total_floors",     # ✅ اضافه شد
+    "کل طبقات": "total_floors",        # ✅ اضافه شد
+    "واحد در طبقه": "unit_count",      # ✅ اضافه شد
 }
+
 
 async def handle_callback_query(update: Update, context=None):
     query = update.callback_query

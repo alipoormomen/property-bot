@@ -7,22 +7,41 @@ FIELD_NAMES_FA = {
     "معامله": "transaction_type",
     "نوع ملک": "property_type",
     "ملک": "property_type",
+    "نوع کاربری": "usage_type",
+    "کاربری": "usage_type",
     "محله": "neighborhood",
     "منطقه": "neighborhood",
+    "شهر": "city",
     "متراژ": "area",
     "متر": "area",
     "اتاق": "bedroom_count",
     "خواب": "bedroom_count",
+    "تعداد اتاق": "bedroom_count",
     "طبقه": "floor",
+    "کل طبقات": "total_floors",
+    "تعداد طبقات": "total_floors",
+    "واحد در طبقه": "unit_count",
+    "تعداد واحد": "unit_count",
+    "آسانسور": "has_elevator",
+    "پارکینگ": "has_parking",
+    "انباری": "has_storage",
+    "سال ساخت": "build_year",
     "قیمت": "price_total",
     "رهن": "price_total",
     "اجاره": "rent",
     "نام": "owner_name",
+    "نام مالک": "owner_name",
     "اسم": "owner_name",
     "تلفن": "owner_phone",
     "شماره": "owner_phone",
     "موبایل": "owner_phone",
+    # ✅ اضافه شده برای امکانات
+    "امکانات": "additional_features",
+    "ویژگی": "additional_features",
+    "ویژگی‌ها": "additional_features",
+    "امکانات خاص": "additional_features",
 }
+
 
 # ✅ نگاشت مقادیر انگلیسی به فارسی
 VALUE_TRANSLATION = {
@@ -129,7 +148,7 @@ def format_property_summary(data: Dict) -> str:
         lines.append(f"تعداد کل طبقات: {data['total_floors']}")
     
     if data.get("floor"):
-        lines.append(f"طبقه: {data['floor']}")
+        lines.append(f"واحد در چه طبقه‌ای است: {data['floor']}")
     
     if data.get("unit_count"):
         lines.append(f"واحد در طبقه: {data['unit_count']}")
@@ -157,6 +176,9 @@ def format_property_summary(data: Dict) -> str:
     
     if data.get("owner_phone"):
         lines.append(f"تلفن: {data['owner_phone']}")
+        
+    if data.get("additional_features"):
+        lines.append(f"امکانات: {data['additional_features']}")
 
     lines.append("=" * 30)
     return "\n".join(lines)
