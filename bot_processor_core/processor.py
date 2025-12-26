@@ -222,12 +222,27 @@ async def process_text(text: str, user_id: int, update: Update):
     # === پردازش فیلد pending ===
     pending_field = get_pending_field(user_id)
     
+    # === اگر pending_field داریم، مقادیر متناقض LLM را نادیده بگیر ===
     if pending_field:
+        # حذف مقادیری که LLM اشتباه استخراج کرده
+        conflicting_fields = ['price_total', 'rent', 'deposit', 'area', 'floor', 'bedroom_count', 'total_floors', 'unit_count', 'build_year']
+        fields_to_remove = []
+        for cf in conflicting_fields:
+            if cf in extracted and cf != pending_field:
+                fields_to_remove.append(cf)
+        
+        for cf in fields_to_remove:
+            logger.info(f"🚫 Ignoring LLM extraction of {cf}={extracted[cf]} while pending_field is {pending_field}")
+            del extracted[cf]
+        
+        # پردازش ورودی pending
         handled = await _process_pending_field(
             user_id, text, pending_field, extracted, update
         )
         if handled:
             return  # خطای اعتبارسنجی - منتظر ورودی جدید
+
+
     
     # === نرمال‌سازی داده‌ها ===
     extracted = _normalize_extracted_data(extracted)
@@ -309,9 +324,46 @@ def _normalize_extracted_data(extracted: Dict) -> Dict:
         if validated:
             extracted["floor"] = validated
     
-    return extracted
+    return extracted    # ✅ فقط ۴ فاصله
+
 
 
 async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
-    """پردازش در حالت تایید"""
-    current
+    """مدیریت تایید یا ویرایش نهایی اطلاعات"""
+    
+    clean_text = str(text).strip().replace("✅", "").replace("❌", "").replace("✏️", "").strip().lower()
+    
+    # ✅ تایید نهایی
+    if clean_text in {"تایید", "تأیید", "بله", "اره", "آره", "ok", "yes"}:
+        await update.message.reply_text(
+            "✅ اطلاعات ملک با موفقیت ثبت شد!\n"
+            "🙏 از همکاری شما متشکریم.\n\n"
+            "برای ثبت ملک جدید، می‌توانید دوباره اطلاعات را ارسال کنید.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        clear_state(user_id)
+        return
+    
+    # ✏️ درخواست ویرایش
+    if clean_text == "ویرایش":
+        await update.message.reply_text(
+            "✏️ برای ویرایش، فیلد را به این فرمت ارسال کنید:\n\n"
+            "مثال:\n"
+            "• متراژ: 120\n"
+            "• قیمت: 5000000000\n"
+            "• محله: گلسار",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+    
+    # ❌ ورودی نامفهوم - نمایش دکمه‌ها
+    keyboard = ReplyKeyboardMarkup(
+        [["✅ تایید", "✏️ ویرایش"]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await update.message.reply_text(
+        "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+        reply_markup=keyboard
+    )
+

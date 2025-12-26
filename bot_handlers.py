@@ -5,7 +5,7 @@ from telegram import Update, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 
 from stt import voice_to_text
-from bot_processor import process_text
+from bot_processor_core import process_text
 from conversation_state import clear_state
 
 logger = logging.getLogger(__name__)
