@@ -151,7 +151,7 @@ def format_property_summary(data: Dict) -> str:
         lines.append(f"واحد در چه طبقه‌ای است: {data['floor']}")
     
     if data.get("unit_count"):
-        lines.append(f"واحد در طبقه: {data['unit_count']}")
+        lines.append(f"هر طبقه چند واحد دارد: {data['unit_count']}")
     
     if data.get("has_elevator") is not None:
         lines.append(f"آسانسور: {'دارد' if data['has_elevator'] else 'ندارد'}")
@@ -165,11 +165,33 @@ def format_property_summary(data: Dict) -> str:
     if data.get("has_storage") is not None:
         lines.append(f"انباری: {'دارد' if data['has_storage'] else 'ندارد'}")
     
-    if data.get("price_total"):
-        lines.append(f"قیمت/رهن: {data['price_total']:,.0f} تومان")
+    # ✅ نمایش قیمت بر اساس نوع معامله
+    transaction = data.get("transaction_type", "")
     
-    if data.get("rent"):
-        lines.append(f"اجاره: {data['rent']:,.0f} تومان")
+    if transaction in ["رهن و اجاره", "Rent", "اجاره"]:
+        # حالت رهن و اجاره - اولویت با deposit
+        deposit_value = data.get("deposit") or data.get("price_total")
+        if deposit_value:
+            try:
+                deposit_num = float(deposit_value)
+                lines.append(f"💰 مبلغ رهن: {deposit_num:,.0f} تومان")
+            except (ValueError, TypeError):
+                lines.append(f"💰 مبلغ رهن: {deposit_value} تومان")
+        
+        rent_value = data.get("rent")
+        if rent_value:
+            try:
+                rent_num = float(rent_value)
+                lines.append(f"💵 اجاره ماهیانه: {rent_num:,.0f} تومان")
+            except (ValueError, TypeError):
+                lines.append(f"💵 اجاره ماهیانه: {rent_value} تومان")
+
+
+    else:
+        # حالت فروش یا پیش‌فروش
+        if data.get("price_total"):
+            lines.append(f"💰 قیمت کل: {data['price_total']:,.0f} تومان")
+
     
     if data.get("owner_name"):
         lines.append(f"نام مالک: {data['owner_name']}")

@@ -21,9 +21,12 @@ FIELD_ORDER = [
     "neighborhood",
     "owner_name",
     "owner_phone",
-    "price_total",
-    "additional_features",  # آخرین فیلد
+    "price_total",      # برای فروش
+    "deposit",          # ✅ اضافه شد - رهن
+    "rent",             # ✅ اضافه شد - اجاره
+    "additional_features",
 ]
+
 
 # فیلدهای اجباری برای هر نوع ملک
 REQUIRED_FIELDS_BASE = [

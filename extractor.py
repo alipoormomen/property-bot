@@ -19,22 +19,40 @@ client = OpenAI(
 # پرامپت اصلی استخراج اطلاعات ملک
 EXTRACTOR_SYSTEM_ROLE = "You are a Persian real estate data extractor. Extract data and return ONLY valid JSON."
 
-EXTRACTOR_PROMPT_TEMPLATE = """Extract from this text:
+EXTRACTOR_PROMPT_TEMPLATE = """Extract real estate info from Persian text:
 "{text}"
 
-Return JSON (null if missing):
-{{"transaction_type": "فروش/رهن و اجاره/پیش‌فروش",
-"property_type": "آپارتمان/ویلا/زمین/مغازه",
-"usage_type": "مسکونی/تجاری/اداری",
-"price_total": number, "rent": number, "deposit": number,
-"area": number, "bedroom_count": number,
-"build_year": number, "floor": number,
-"total_floors": number, "unit_count": number,
-"has_parking": bool, "parking_count": number,
-"has_elevator": bool, "has_storage": bool,
-"storage_count": number, "owner_name": "string",
-"owner_phone": "string", "neighborhood": "string",
-"city": "string"}}"""
+Return ONLY valid JSON with these fields (use null if not found):
+{{
+  "transaction_type": "فروش" or "رهن و اجاره" or "پیش‌فروش",
+  "property_type": "آپارتمان" or "ویلا" or "زمین" or "مغازه",
+  "usage_type": "مسکونی" or "تجاری" or "اداری",
+  "area": number (متراژ),
+  "bedroom_count": number (تعداد اتاق/خواب),
+  "total_floors": number (تعداد کل طبقات ساختمان),
+  "floor": number (واحد در طبقه چندم است),
+  "unit_count": number (هر طبقه چند واحد دارد),
+  "has_elevator": boolean (آسانسور),
+  "build_year": number (سال ساخت),
+  "price_total": number (قیمت کل یا رهن),
+  "rent": number (اجاره ماهیانه),
+  "deposit": number (ودیعه),
+  "neighborhood": "string" (محله),
+  "city": "string" (شهر),
+  "owner_name": "string" (نام مالک),
+  "owner_phone": "string" (شماره تلفن),
+  "has_parking": boolean,
+  "has_storage": boolean,
+  "additional_features": "string" (امکانات مثل: لابی، استخر، سونا، نگهبان)
+}}
+
+IMPORTANT: 
+- "واحد در طبقه: 3" means unit_count=3 (3 units per floor)
+- "طبقه: 8" or "واحد در طبقه 8" means floor=8
+- "امکانات: سونا" means additional_features="سونا"
+"""
+
+
 
 # پرامپت استخراج امکانات اضافی
 FEATURES_SYSTEM_ROLE = "You are a Persian real estate feature extractor. Extract amenities and return ONLY valid JSON."
