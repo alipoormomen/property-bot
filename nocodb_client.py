@@ -1,433 +1,349 @@
-# nocodb_client.py
+# nocodb_client.py - آپدیت شده با Table IDهای واقعی
 """
-NocoDB Client for PropertyBot
-Handles all database operations with NocoDB API
+NocoDB Client - ماژول ارتباط با دیتابیس
 """
 
 import os
 import httpx
-from typing import Optional, Dict, List, Any
+from typing import Optional
 from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ============================================================
+# ═══════════════════════════════════════════════════════════
 # تنظیمات اتصال
-# ============================================================
+# ═══════════════════════════════════════════════════════════
 
 NOCODB_URL = os.getenv("NOCODB_URL", "http://localhost:8080")
 NOCODB_TOKEN = os.getenv("NOCODB_TOKEN")
 
-# Table IDs از خروجی setup
-TABLE_IDS = {
+# Table IDs - از NocoDB استخراج شده
+TABLES = {
     "users": "m2exwsn2lm2scg7",
-    "properties": "mwgik4tnx5fdrls",
+    "properties": "mwgik4tnx5fdrls", 
     "transactions": "mn0clzygu0ex3lq",
-    "packages": "mbgg7z5f3uv36jd",
+    "packages": "mv3d40e9u4xlmi2",  # ✅ جدید
     "ai_config": "mea2jyex8qolo6t",
 }
 
-HEADERS = {
-    "xc-token": NOCODB_TOKEN,
-    "Content-Type": "application/json"
-}
+
+def _headers():
+    return {"xc-token": NOCODB_TOKEN}
+
+def _table_url(table_name: str) -> str:
+    """ساخت URL برای دسترسی به جدول"""
+    table_id = TABLES.get(table_name)
+    if not table_id:
+        raise ValueError(f"Table '{table_name}' not found in TABLES config")
+    return f"{NOCODB_URL}/api/v2/tables/{table_id}/records"
 
 
-# ============================================================
-# توابع پایه API
-# ============================================================
+# ═══════════════════════════════════════════════════════════
+# مدیریت کاربران
+# ═══════════════════════════════════════════════════════════
 
-async def _request(method: str, endpoint: str, data: Dict = None) -> Dict:
-    """ارسال درخواست به NocoDB API"""
-    url = f"{NOCODB_URL}/api/v2{endpoint}"
-    
-    async with httpx.AsyncClient(timeout=30) as client:
-        if method == "GET":
-            response = await client.get(url, headers=HEADERS, params=data)
-        elif method == "POST":
-            response = await client.post(url, headers=HEADERS, json=data)
-        elif method == "PATCH":
-            response = await client.patch(url, headers=HEADERS, json=data)
-        elif method == "DELETE":
-            response = await client.delete(url, headers=HEADERS)
-        else:
-            raise ValueError(f"Unknown method: {method}")
-        
-        if response.status_code >= 400:
-            raise Exception(f"NocoDB Error {response.status_code}: {response.text}")
-        
-        return response.json() if response.text else {}
+async def get_user(telegram_id: int) -> Optional[dict]:
+    """دریافت اطلاعات کاربر با telegram_id"""
+    async with httpx.AsyncClient() as client:
+        url = _table_url("users")
+        params = {"where": f"(telegram_id,eq,{telegram_id})"}
+        resp = await client.get(url, headers=_headers(), params=params)
+        if resp.status_code == 200:
+            data = resp.json()
+            records = data.get("list", [])
+            return records[0] if records else None
+    return None
 
 
-def _table_url(table: str) -> str:
-    """ساخت URL برای جدول"""
-    return f"/tables/{TABLE_IDS[table]}/records"
+async def create_user(telegram_id: int, username: str = None, 
+                      first_name: str = None, phone: str = None) -> dict:
+    """ایجاد کاربر جدید"""
+    async with httpx.AsyncClient() as client:
+        url = _table_url("users")
+        payload = {
+            "telegram_id": telegram_id,
+            "username": username,
+            "first_name": first_name,
+            "phone": phone,
+            "credit_balance": 0,
+            "is_active": True,
+            "created_at": datetime.now().isoformat(),
+        }
+        resp = await client.post(url, headers=_headers(), json=payload)
+        return resp.json()
 
 
-# ============================================================
-# 👤 مدیریت کاربران (users)
-# ============================================================
-
-async def get_user(telegram_id: int) -> Optional[Dict]:
-    """دریافت کاربر با telegram_id"""
-    endpoint = _table_url("users")
-    params = {"where": f"(telegram_id,eq,{telegram_id})"}
-    
-    result = await _request("GET", endpoint, params)
-    records = result.get("list", [])
-    
-    return records[0] if records else None
-
-
-async def create_user(
-    telegram_id: int,
-    phone: str = None,
-    first_name: str = None,
-    username: str = None,
-    initial_credit: int = 5000  # اعتبار اولیه رایگان
-) -> Dict:
-    """ساخت کاربر جدید"""
-    data = {
-        "telegram_id": telegram_id,
-        "phone": phone,
-        "first_name": first_name,
-        "username": username,
-        "credit_balance": initial_credit,
-        "total_spent": 0,
-        "is_active": True,
-        "created_at": datetime.now().isoformat(),
-        "updated_at": datetime.now().isoformat(),
-    }
-    
-    return await _request("POST", _table_url("users"), data)
-
-
-async def get_or_create_user(telegram_id: int, **kwargs) -> Dict:
-    """دریافت یا ساخت کاربر"""
+async def get_or_create_user(telegram_id: int, **kwargs) -> dict:
+    """دریافت یا ایجاد کاربر"""
     user = await get_user(telegram_id)
     if user:
         return user
     return await create_user(telegram_id, **kwargs)
 
 
-async def update_user_credit(telegram_id: int, amount: int, operation: str = "subtract") -> Dict:
-    """
-    بروزرسانی اعتبار کاربر
-    operation: 'subtract' برای کم کردن، 'add' برای اضافه کردن
-    """
-    user = await get_user(telegram_id)
-    if not user:
-        raise Exception(f"User {telegram_id} not found")
-    
-    current = user.get("credit_balance", 0)
-    
-    if operation == "subtract":
-        new_balance = max(0, current - amount)
-        new_spent = user.get("total_spent", 0) + amount
-    else:  # add
-        new_balance = current + amount
-        new_spent = user.get("total_spent", 0)
-    
-    row_id = user["Id"]
-    endpoint = f"{_table_url('users')}/{row_id}"
-    
-    data = {
-        "credit_balance": new_balance,
-        "total_spent": new_spent,
-        "updated_at": datetime.now().isoformat()
-    }
-    
-    return await _request("PATCH", endpoint, data)
-
-
-async def check_user_credit(telegram_id: int, required: int) -> bool:
-    """بررسی کافی بودن اعتبار"""
+async def update_user_credit(telegram_id: int, new_balance: int) -> bool:
+    """بروزرسانی اعتبار کاربر"""
     user = await get_user(telegram_id)
     if not user:
         return False
-    return user.get("credit_balance", 0) >= required
+    
+    async with httpx.AsyncClient() as client:
+        url = _table_url("users")
+        payload = {
+            "Id": user["Id"],
+            "credit_balance": new_balance
+        }
+        resp = await client.patch(url, headers=_headers(), json=payload)
+        return resp.status_code == 200
 
 
-async def update_user_phone(telegram_id: int, phone: str) -> Dict:
-    """بروزرسانی شماره موبایل"""
+async def add_credit(telegram_id: int, amount: int) -> Optional[int]:
+    """افزایش اعتبار کاربر - برمی‌گرداند موجودی جدید"""
     user = await get_user(telegram_id)
     if not user:
-        raise Exception(f"User {telegram_id} not found")
-    
-    row_id = user["Id"]
-    endpoint = f"{_table_url('users')}/{row_id}"
-    
-    data = {
-        "phone": phone,
-        "updated_at": datetime.now().isoformat()
-    }
-    
-    return await _request("PATCH", endpoint, data)
-
-
-# ============================================================
-# 🏠 مدیریت املاک (properties)
-# ============================================================
-
-async def create_property(
-    telegram_id: int,
-    raw_text: str,
-    extracted_data: Dict,
-    ai_tokens_used: int = 0,
-    ai_cost: int = 0
-) -> Dict:
-    """ثبت ملک جدید"""
-    data = {
-        "user_id": telegram_id,
-        "raw_text": raw_text,
-        "property_type": extracted_data.get("property_type"),
-        "transaction_type": extracted_data.get("transaction_type"),
-        "city": extracted_data.get("city"),
-        "neighborhood": extracted_data.get("neighborhood"),
-        "area": extracted_data.get("area"),
-        "rooms": extracted_data.get("rooms"),
-        "price": extracted_data.get("price"),
-        "price_per_meter": extracted_data.get("price_per_meter"),
-        "deposit": extracted_data.get("deposit"),
-        "rent": extracted_data.get("rent"),
-        "features": ",".join(extracted_data.get("features", [])),
-        "floor": extracted_data.get("floor"),
-        "total_floors": extracted_data.get("total_floors"),
-        "year_built": extracted_data.get("year_built"),
-        "extracted_json": str(extracted_data),
-        "ai_tokens_used": ai_tokens_used,
-        "ai_cost": ai_cost,
-        "status": "pending",
-        "created_at": datetime.now().isoformat(),
-    }
-    
-    return await _request("POST", _table_url("properties"), data)
-
-
-async def get_user_properties(telegram_id: int, limit: int = 10) -> List[Dict]:
-    """دریافت املاک کاربر"""
-    endpoint = _table_url("properties")
-    params = {
-        "where": f"(user_id,eq,{telegram_id})",
-        "sort": "-created_at",
-        "limit": limit
-    }
-    
-    result = await _request("GET", endpoint, params)
-    return result.get("list", [])
-
-
-async def get_property(property_id: int) -> Optional[Dict]:
-    """دریافت یک ملک با ID"""
-    endpoint = f"{_table_url('properties')}/{property_id}"
-    
-    try:
-        return await _request("GET", endpoint)
-    except:
         return None
-
-
-async def update_property_status(property_id: int, status: str) -> Dict:
-    """بروزرسانی وضعیت ملک"""
-    endpoint = f"{_table_url('properties')}/{property_id}"
-    data = {"status": status}
     
-    return await _request("PATCH", endpoint, data)
+    new_balance = user.get("credit_balance", 0) + amount
+    success = await update_user_credit(telegram_id, new_balance)
+    return new_balance if success else None
 
 
-# ============================================================
-# 💳 مدیریت تراکنش‌ها (transactions)
-# ============================================================
+async def deduct_credit(telegram_id: int, amount: int) -> Optional[int]:
+    """کسر اعتبار کاربر - برمی‌گرداند موجودی جدید یا None اگر موجودی کافی نباشد"""
+    user = await get_user(telegram_id)
+    if not user:
+        return None
+    
+    current = user.get("credit_balance", 0)
+    if current < amount:
+        return None  # موجودی کافی نیست
+    
+    new_balance = current - amount
+    success = await update_user_credit(telegram_id, new_balance)
+    return new_balance if success else None
+
+
+async def get_user_credit(telegram_id: int) -> int:
+    """دریافت موجودی فعلی کاربر"""
+    user = await get_user(telegram_id)
+    if user:
+        return user.get("credit_balance", 0)
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════
+# مدیریت ملک‌ها
+# ═══════════════════════════════════════════════════════════
+
+async def create_property(user_telegram_id: int, property_data: dict) -> dict:
+    """ذخیره ملک جدید"""
+    async with httpx.AsyncClient() as client:
+        url = _table_url("properties")
+        
+        payload = {
+            "user_telegram_id": user_telegram_id,
+            "property_type": property_data.get("property_type"),
+            "transaction_type": property_data.get("transaction_type"),
+            "city": property_data.get("city"),
+            "district": property_data.get("district"),
+            "area_meters": property_data.get("area"),
+            "rooms": property_data.get("rooms"),
+            "price": property_data.get("price"),
+            "price_per_meter": property_data.get("price_per_meter"),
+            "deposit": property_data.get("deposit"),
+            "rent": property_data.get("rent"),
+            "floor": property_data.get("floor"),
+            "total_floors": property_data.get("total_floors"),
+            "features": ",".join(property_data.get("features", [])),
+            "raw_text": property_data.get("raw_text"),
+            "created_at": datetime.now().isoformat(),
+        }
+        
+        # حذف مقادیر None
+        payload = {k: v for k, v in payload.items() if v is not None}
+        
+        resp = await client.post(url, headers=_headers(), json=payload)
+        return resp.json()
+
+
+async def get_user_properties(telegram_id: int, limit: int = 10) -> list:
+    """دریافت ملک‌های کاربر"""
+    async with httpx.AsyncClient() as client:
+        url = _table_url("properties")
+        params = {
+            "where": f"(user_telegram_id,eq,{telegram_id})",
+            "limit": limit,
+            "sort": "-created_at"
+        }
+        resp = await client.get(url, headers=_headers(), params=params)
+        if resp.status_code == 200:
+            return resp.json().get("list", [])
+    return []
+
+
+# ═══════════════════════════════════════════════════════════
+# مدیریت تراکنش‌ها
+# ═══════════════════════════════════════════════════════════
 
 async def create_transaction(
-    telegram_id: int,
-    tx_type: str,  # 'usage' | 'purchase' | 'bonus' | 'refund'
+    user_telegram_id: int,
+    trans_type: str,  # "charge" | "usage" | "refund"
     amount: int,
-    description: str,
-    property_id: int = None,
+    description: str = None,
     package_id: int = None,
     ai_model: str = None,
     tokens_used: int = None
-) -> Dict:
+) -> dict:
     """ثبت تراکنش جدید"""
-    data = {
-        "user_id": telegram_id,
-        "type": tx_type,
-        "amount": amount,
-        "description": description,
-        "property_id": property_id,
-        "package_id": package_id,
-        "ai_model": ai_model,
-        "tokens_used": tokens_used,
-        "created_at": datetime.now().isoformat(),
-    }
-    
-    return await _request("POST", _table_url("transactions"), data)
+    async with httpx.AsyncClient() as client:
+        url = _table_url("transactions")
+        
+        payload = {
+            "user_telegram_id": user_telegram_id,
+            "type": trans_type,
+            "amount": amount,
+            "description": description,
+            "package_id": package_id,
+            "ai_model": ai_model,
+            "tokens_used": tokens_used,
+            "created_at": datetime.now().isoformat(),
+        }
+        payload = {k: v for k, v in payload.items() if v is not None}
+        
+        resp = await client.post(url, headers=_headers(), json=payload)
+        return resp.json()
 
 
-async def get_user_transactions(telegram_id: int, limit: int = 20) -> List[Dict]:
-    """دریافت تراکنش‌های کاربر"""
-    endpoint = _table_url("transactions")
-    params = {
-        "where": f"(user_id,eq,{telegram_id})",
-        "sort": "-created_at",
-        "limit": limit
-    }
-    
-    result = await _request("GET", endpoint, params)
-    return result.get("list", [])
+async def get_user_transactions(telegram_id: int, limit: int = 20) -> list:
+    """دریافت تاریخچه تراکنش‌های کاربر"""
+    async with httpx.AsyncClient() as client:
+        url = _table_url("transactions")
+        params = {
+            "where": f"(user_telegram_id,eq,{telegram_id})",
+            "limit": limit,
+            "sort": "-created_at"
+        }
+        resp = await client.get(url, headers=_headers(), params=params)
+        if resp.status_code == 200:
+            return resp.json().get("list", [])
+    return []
 
 
-# ============================================================
-# 📦 مدیریت بسته‌ها (packages)
-# ============================================================
+# ═══════════════════════════════════════════════════════════
+# مدیریت بسته‌ها و تنظیمات
+# ═══════════════════════════════════════════════════════════
 
-async def get_all_packages(active_only: bool = True) -> List[Dict]:
-    """دریافت لیست بسته‌ها"""
-    endpoint = _table_url("packages")
-    params = {"sort": "price"}
-    
-    if active_only:
-        params["where"] = "(is_active,eq,true)"
-    
-    result = await _request("GET", endpoint, params)
-    return result.get("list", [])
-
-
-async def get_package(package_id: int) -> Optional[Dict]:
-    """دریافت یک بسته"""
-    endpoint = f"{_table_url('packages')}/{package_id}"
-    
-    try:
-        return await _request("GET", endpoint)
-    except:
-        return None
+async def get_active_packages() -> list:
+    """دریافت لیست بسته‌های فعال"""
+    async with httpx.AsyncClient() as client:
+        url = _table_url("packages")
+        params = {
+            "where": "(is_active,eq,true)",
+            "sort": "sort_order"
+        }
+        resp = await client.get(url, headers=_headers(), params=params)
+        if resp.status_code == 200:
+            return resp.json().get("list", [])
+    return []
 
 
-# ============================================================
-# ⚙️ تنظیمات AI (ai_config)
-# ============================================================
-
-async def get_ai_config(model_name: str) -> Optional[Dict]:
-    """دریافت تنظیمات یک مدل AI"""
-    endpoint = _table_url("ai_config")
-    params = {"where": f"(model_name,eq,{model_name})"}
-    
-    result = await _request("GET", endpoint, params)
-    records = result.get("list", [])
-    
-    return records[0] if records else None
+async def get_package_by_id(package_id: int) -> Optional[dict]:
+    """دریافت اطلاعات یک بسته"""
+    async with httpx.AsyncClient() as client:
+        url = f"{_table_url('packages')}/{package_id}"
+        resp = await client.get(url, headers=_headers())
+        if resp.status_code == 200:
+            return resp.json()
+    return None
 
 
-async def get_all_ai_configs() -> List[Dict]:
-    """دریافت همه تنظیمات AI"""
-    endpoint = _table_url("ai_config")
-    result = await _request("GET", endpoint)
-    return result.get("list", [])
+async def get_ai_config(model_name: str = "gpt-4o-mini") -> Optional[dict]:
+    """دریافت تنظیمات مدل AI"""
+    async with httpx.AsyncClient() as client:
+        url = _table_url("ai_config")
+        params = {"where": f"(model_name,eq,{model_name})"}
+        resp = await client.get(url, headers=_headers(), params=params)
+        if resp.status_code == 200:
+            records = resp.json().get("list", [])
+            return records[0] if records else None
+    return None
 
 
-async def calculate_ai_cost(model_name: str, input_tokens: int, output_tokens: int = 0) -> int:
-    """محاسبه هزینه AI بر اساس توکن‌ها"""
+# ═══════════════════════════════════════════════════════════
+# توابع کمکی برای محاسبه هزینه
+# ═══════════════════════════════════════════════════════════
+
+async def calculate_cost(model_name: str, input_tokens: int, output_tokens: int) -> int:
+    """محاسبه هزینه بر اساس توکن مصرفی (تومان)"""
     config = await get_ai_config(model_name)
-    
     if not config:
-        # fallback به نرخ پیش‌فرض
-        return int((input_tokens + output_tokens) * 0.1)
+        # مقادیر پیش‌فرض
+        input_price = 22.5  # تومان per 1K
+        output_price = 90   # تومان per 1K
+    else:
+        input_price = config.get("input_price_per_1k", 22.5)
+        output_price = config.get("output_price_per_1k", 90)
     
-    input_cost = (input_tokens / 1000) * config.get("input_price_per_1k", 0)
-    output_cost = (output_tokens / 1000) * config.get("output_price_per_1k", 0)
-    
-    return int(input_cost + output_cost)
+    cost = (input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)
+    return int(cost) + 1  # گرد به بالا
 
 
-# ============================================================
-# 🔧 توابع کمکی
-# ============================================================
-
-async def log_ai_usage(
-    telegram_id: int,
-    model: str,
-    input_tokens: int,
-    output_tokens: int,
-    property_id: int = None,
-    description: str = None
-) -> int:
+async def process_ai_request(telegram_id: int, model_name: str,
+                             input_tokens: int, output_tokens: int) -> dict:
     """
-    ثبت مصرف AI و کم کردن اعتبار
-    Returns: هزینه کسر شده
+    پردازش درخواست AI با کسر اعتبار
+    Returns: {"success": bool, "cost": int, "new_balance": int, "error": str?}
     """
     # محاسبه هزینه
-    cost = await calculate_ai_cost(model, input_tokens, output_tokens)
+    cost = await calculate_cost(model_name, input_tokens, output_tokens)
     
-    # کم کردن از اعتبار
-    await update_user_credit(telegram_id, cost, "subtract")
+    # بررسی و کسر اعتبار
+    new_balance = await deduct_credit(telegram_id, cost)
+    
+    if new_balance is None:
+        current = await get_user_credit(telegram_id)
+        return {
+            "success": False,
+            "cost": cost,
+            "current_balance": current,
+            "error": "اعتبار کافی نیست"
+        }
     
     # ثبت تراکنش
     await create_transaction(
-        telegram_id=telegram_id,
-        tx_type="usage",
+        user_telegram_id=telegram_id,
+        trans_type="usage",
         amount=-cost,
-        description=description or f"استفاده از {model}",
-        property_id=property_id,
-        ai_model=model,
+        description=f"استفاده از {model_name}",
+        ai_model=model_name,
         tokens_used=input_tokens + output_tokens
     )
     
-    return cost
-
-
-async def purchase_package(telegram_id: int, package_id: int) -> Dict:
-    """
-    خرید بسته اعتباری
-    Returns: اطلاعات خرید
-    """
-    package = await get_package(package_id)
-    if not package:
-        raise Exception("بسته پیدا نشد")
-    
-    if not package.get("is_active"):
-        raise Exception("این بسته غیرفعال است")
-    
-    credit_amount = package["credit_amount"]
-    bonus = package.get("bonus_percent", 0)
-    total_credit = int(credit_amount * (1 + bonus / 100))
-    
-    # اضافه کردن اعتبار
-    await update_user_credit(telegram_id, total_credit, "add")
-    
-    # ثبت تراکنش
-    await create_transaction(
-        telegram_id=telegram_id,
-        tx_type="purchase",
-        amount=total_credit,
-        description=f"خرید بسته {package['name']}",
-        package_id=package_id
-    )
-    
     return {
-        "package": package,
-        "credit_added": total_credit,
-        "bonus_applied": bonus
+        "success": True,
+        "cost": cost,
+        "new_balance": new_balance
     }
 
 
-# ============================================================
-# 🧪 تست اتصال
-# ============================================================
+# ═══════════════════════════════════════════════════════════
+# تست اتصال
+# ═══════════════════════════════════════════════════════════
 
 async def test_connection() -> bool:
     """تست اتصال به NocoDB"""
     try:
-        packages = await get_all_packages()
-        print(f"✅ اتصال برقرار! {len(packages)} بسته یافت شد.")
+        packages = await get_active_packages()
+        print(f"✅ اتصال برقرار! {len(packages)} بسته فعال یافت شد.")
+        for pkg in packages:
+            print(f"   📦 {pkg.get('name')}: {pkg.get('price'):,} تومان → {pkg.get('credit'):,} اعتبار")
         return True
     except Exception as e:
         print(f"❌ خطا در اتصال: {e}")
         return False
 
 
-# برای تست مستقیم
 if __name__ == "__main__":
     import asyncio
     asyncio.run(test_connection())
