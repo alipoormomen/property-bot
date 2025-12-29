@@ -8,6 +8,10 @@ from services.nocodb_client import create_property
 from extractor import extract_json
 from phone_utils import normalize_iran_phone
 from rule_engine import run_rule_engine
+from nocodb_client import consume_credit, add_credit
+
+from nocodb_client import add_credit
+
 from conversation_state import (
     merge_state,
     get_pending_field,
@@ -453,57 +457,90 @@ def _normalize_extracted_data(extracted: Dict) -> Dict:
 
 async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
     """مدیریت تایید یا ویرایش نهایی اطلاعات"""
-    from .handlers import handle_edit_request  # ✅ اضافه کنید
-    
-    clean_text = str(text).strip().replace("✅", "").replace("❌", "").replace("✏️", "").strip().lower()
-    
+    from .handlers import handle_edit_request
 
-# ✅ تایید نهایی و ذخیره در دیتابیس
-if clean_text in {"تایید", "تأیید", "✅ تایید", "بله", "اره", "آره", "ok", "yes"}:
-    state = get_state(user_id) or {}
-    state.setdefault("user_telegram_id", str(user_id))
+    clean_text = (
+        str(text)
+        .replace("✅", "")
+        .replace("❌", "")
+        .replace("✏️", "")
+        .strip()
+        .lower()
+    )
 
-    try:
-        # ذخیره ملک در NocoDB (async)
-        resp = await create_property(
-            user_telegram_id=user_id,
-            property_data=state
-        )
+    # ✅ تایید نهایی و ذخیره در دیتابیس
+    if clean_text in {"تایید", "تأیید", "بله", "اره", "آره", "ok", "yes"}:
+        state = get_state(user_id) or {}
+        state.setdefault("user_telegram_id", str(user_id))
 
-        logger.info(f"✅ Property created for user {user_id}: {resp}")
+        credit_tx_id = None
 
-        clear_state(user_id)
+        try:
+            # 1️⃣ مصرف اعتبار
+            credit_result = await consume_credit(
+                telegram_id=str(user_id),
+                amount=1,
+                reason="property_registration"
+            )
 
-        await update.message.reply_text(
-            "✅ اطلاعات ملک با موفقیت ثبت شد!\n"
-            "🙏 از همکاری شما متشکریم.\n\n"
-            "برای ثبت ملک جدید، می‌توانید دوباره اطلاعات را ارسال کنید.",
-            reply_markup=ReplyKeyboardRemove()
-        )
+            if not credit_result["success"]:
+                await update.message.reply_text(
+                    "❌ اعتبار شما برای ثبت آگهی کافی نیست.\n"
+                    "لطفاً بسته اعتباری خریداری کنید."
+                )
+                return
 
-    except Exception as e:
-        logger.error(
-            f"❌ Error saving property for user {user_id}: {e}",
-            exc_info=True
-        )
-        await update.message.reply_text(
-            "❌ در ثبت اطلاعات ملک مشکلی پیش آمد.\n"
-            "لطفاً دوباره تلاش کنید یا بعداً امتحان کنید."
-        )
+            credit_tx_id = credit_result.get("transaction_id")
 
-    return
+            # 2️⃣ ثبت ملک
+            resp = await create_property(
+                user_telegram_id=user_id,
+                property_data=state
+            )
 
-    
-    # ✏️ درخواست ویرایش (فقط دکمه)
+            logger.info(f"✅ Property created for user {user_id}: {resp}")
+
+            clear_state(user_id)
+
+            await update.message.reply_text(
+                "✅ اطلاعات ملک با موفقیت ثبت شد!\n"
+                "🙏 از همکاری شما متشکریم.\n\n"
+                "برای ثبت ملک جدید، می‌توانید دوباره اطلاعات را ارسال کنید.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+
+        except Exception as e:
+            logger.error(
+                f"❌ Error saving property for user {user_id}: {e}",
+                exc_info=True
+            )
+
+            # 🔄 Rollback واقعی
+            if credit_tx_id:
+                await add_credit(
+                    telegram_id=str(user_id),
+                    amount=1,
+                    reason="rollback_property_registration",
+                    ref_transaction_id=credit_tx_id
+                )
+
+            await update.message.reply_text(
+                "❌ ثبت ملک ناموفق بود.\n"
+                "✅ اعتبار شما بازگردانده شد."
+            )
+
+        return
+
+    # ✏️ درخواست ویرایش (دکمه)
     if clean_text == "ویرایش":
         current_state = get_state(user_id)
         summary = format_confirmation_message(current_state)
-        
+
         keyboard = ReplyKeyboardMarkup(
             KEYBOARD_OPTIONS["confirmation"],
             resize_keyboard=True
         )
-        
+
         await update.message.reply_text(
             f"{summary}\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
@@ -515,13 +552,13 @@ if clean_text in {"تایید", "تأیید", "✅ تایید", "بله", "ار�
             reply_markup=keyboard
         )
         return
-    
-    # ✏️ پردازش درخواست ویرایش (مثلاً "متراژ: 120")
+
+    # ✏️ پردازش ویرایش متنی
     edit_handled = await handle_edit_request(user_id, text, update)
     if edit_handled:
-        return  # ✅ ویرایش انجام شد و خلاصه نمایش داده شد
-    
-    # ❌ ورودی نامفهوم - نمایش دکمه‌ها
+        return
+
+    # ❌ ورودی نامفهوم
     keyboard = ReplyKeyboardMarkup(
         [["✅ تایید", "✏️ ویرایش"]],
         resize_keyboard=True,
@@ -531,6 +568,7 @@ if clean_text in {"تایید", "تأیید", "✅ تایید", "بله", "ار�
         "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
         reply_markup=keyboard
     )
+
 
 
 
