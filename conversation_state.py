@@ -4,6 +4,7 @@
 import logging
 from typing import Dict, Optional, Any
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,15 @@ def clear_state(user_id: int):
 def set_confirmation_mode(user_id: int, enabled: bool):
     if user_id not in _states:
         _states[user_id] = {}
+
+    # 🔑 Idempotency Token – فقط یک بار ساخته می‌شود
+    if enabled and "confirmation_token" not in _states[user_id]:
+        _states[user_id]["confirmation_token"] = uuid4().hex
+
     _states[user_id]["_confirmation_mode"] = enabled
     _state_timestamps[user_id] = datetime.now()
+
+
 
 
 def is_confirmation_mode(user_id: int) -> bool:
