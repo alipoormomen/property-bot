@@ -106,6 +106,18 @@ async def add_credit(telegram_id: int, amount: int) -> int:
         description="شارژ دستی",
     )
 
+async def refund_credit(
+    telegram_id: int,
+    amount: int,
+    reason: str,
+    ref_transaction_id: str,
+):
+    return await charge_credit(
+        telegram_id=telegram_id,
+        amount=-abs(amount),
+        description=reason,
+        ref_transaction_id=ref_transaction_id,
+    )
 
 async def deduct_credit(telegram_id: int, amount: int) -> Optional[int]:
     result = await consume_credit(
