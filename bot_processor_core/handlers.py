@@ -9,7 +9,7 @@ from conversation_state import get_state, merge_state, set_confirmation_mode
 from bot_utils import format_confirmation_message
 from utils import normalize_price
 from phone_utils import normalize_iran_phone
-
+from nocodb_client import create_property   
 from .constants import KEYBOARD_OPTIONS, PRICE_FIELDS
 
 logger = logging.getLogger(__name__)
@@ -71,9 +71,34 @@ async def handle_callback_query(update: Update, context=None):
         )
 
     elif data == "confirm":
-        await query.message.reply_text(
-            "✅ اطلاعات ملک ثبت شد!\n🙏 متشکریم."
-        )
+        from conversation_state import clear_state  # اگر بالای فایل import نکردی
+
+        # ۱) گرفتن state فعلی کاربر
+        state = get_state(user_id) or {}
+
+        # ۲) اضافه‌کردن user_telegram_id اگر در state نیست
+        state.setdefault("user_telegram_id", str(user_id))
+
+        try:
+            # ۳) ذخیره در NocoDB — تابع async است، حتماً await
+            resp = await create_property(user_telegram_id=user_id, property_data=state)
+
+            logger.info(f"Property created for user {user_id}: {resp}")
+
+            # ۴) پاک‌کردن state بعد از ثبت موفق
+            clear_state(user_id)
+
+            await query.message.reply_text(
+                "✅ اطلاعات ملک با موفقیت در سیستم ثبت شد.\n🙏 متشکریم."
+            )
+
+        except Exception as e:
+            logger.error(f"Error while creating property for {user_id}: {e}", exc_info=True)
+            await query.message.reply_text(
+                "❌ در ثبت اطلاعات ملک در سیستم مشکل پیش آمد.\n"
+                "لطفاً کمی بعد دوباره تلاش کنید یا اطلاعات را دوباره وارد کنید."
+            )
+
 
     elif data == "cancel":
         from conversation_state import clear_state
