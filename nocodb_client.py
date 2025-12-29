@@ -196,38 +196,61 @@ async def get_user_credit(telegram_id: int) -> int:
 # ═══════════════════════════════════════════════════════════
 
 async def create_property(user_telegram_id: int, property_data: dict) -> dict:
-    """ذخیره ملک جدید"""
-    
-    # ✅ تبدیل property_type فارسی به انگلیسی
+    """ذخیره ملک جدید (مطابق Schema واقعی NocoDB)"""
+
+    # ✅ mapping نوع ملک
     property_type_fa = property_data.get("property_type", "other")
-    property_type_en = PROPERTY_TYPE_MAP.get(property_type_fa, "other")
-    
-    # ✅ تبدیل transaction_type فارسی به انگلیسی
+    property_type = PROPERTY_TYPE_MAP.get(property_type_fa, "other")
+
+    # ✅ mapping نوع معامله
     transaction_type_fa = property_data.get("transaction_type", "sale")
-    transaction_type_en = TRANSACTION_TYPE_MAP.get(transaction_type_fa, "sale")
-    
+    transaction_type = TRANSACTION_TYPE_MAP.get(transaction_type_fa, "sale")
+
     payload = {
+        # ارتباط با کاربر
         "user_telegram_id": user_telegram_id,
-        "property_type": property_type_en,
-        "transaction_type": transaction_type_en,  # ✅ اینجا اصلاح شد!
+
+        # مشخصات پایه
         "city": property_data.get("city"),
-        "district": property_data.get("district"),
+        "neighborhood": property_data.get("neighborhood"),
+        "address": property_data.get("address"),
+
+        # نوع‌ها
+        "property_type": property_type,
+        "transaction_type": transaction_type,
+
+        # مشخصات فیزیکی
         "area": property_data.get("area"),
         "rooms": property_data.get("rooms"),
-        "price": property_data.get("price"),
-        "price_per_meter": property_data.get("price_per_meter"),
-        "deposit": property_data.get("deposit"),
-        "rent": property_data.get("rent"),
         "floor": property_data.get("floor"),
         "total_floors": property_data.get("total_floors"),
-        "features": ",".join(property_data.get("features", [])) if property_data.get("features") else None,
+        "year_built": property_data.get("year_built"),
+
+        # قیمت‌ها (⚠️ نام ستون‌ها خیلی مهم)
+        "total_price": property_data.get("total_price"),
+        "price_per_meter": property_data.get("price_per_meter"),
+        "rent_price": property_data.get("rent_price"),
+        "deposit": property_data.get("deposit"),
+
+        # متن و توضیحات
+        "features": ",".join(property_data["features"]) if property_data.get("features") else None,
+        "description": property_data.get("description"),
         "raw_text": property_data.get("raw_text"),
+
+        # متادیتای AI
+        "input_tokens": property_data.get("input_tokens"),
+        "output_tokens": property_data.get("output_tokens"),
+        "audio_seconds": property_data.get("audio_seconds"),
+        "cost_toman": property_data.get("cost_toman"),
+        "source_type": property_data.get("source_type", "telegram"),
+
+        # زمان
         "created_at": datetime.now().isoformat(),
     }
-    
-    # حذف مقادیر None
+
+    # ✅ حذف مقادیر None (خیلی مهم برای NocoDB)
     payload = {k: v for k, v in payload.items() if v is not None}
-    
+
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             _table_url("properties"),
@@ -236,6 +259,7 @@ async def create_property(user_telegram_id: int, property_data: dict) -> dict:
         )
         resp.raise_for_status()
         return resp.json() if resp.text else {"status": "created"}
+
 
 
 async def get_user_properties(telegram_id: int, limit: int = 10) -> list:
