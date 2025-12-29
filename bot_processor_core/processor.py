@@ -4,7 +4,7 @@
 import logging
 from typing import Dict, Optional, Tuple
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
-
+from services.nocodb_client import create_property
 from extractor import extract_json
 from phone_utils import normalize_iran_phone
 from rule_engine import run_rule_engine
@@ -457,16 +457,42 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
     
     clean_text = str(text).strip().replace("✅", "").replace("❌", "").replace("✏️", "").strip().lower()
     
-    # ✅ تایید نهایی
-    if clean_text in {"تایید", "تأیید", "بله", "اره", "آره", "ok", "yes"}:
+
+# ✅ تایید نهایی و ذخیره در دیتابیس
+if clean_text in {"تایید", "تأیید", "✅ تایید", "بله", "اره", "آره", "ok", "yes"}:
+    state = get_state(user_id) or {}
+    state.setdefault("user_telegram_id", str(user_id))
+
+    try:
+        # ذخیره ملک در NocoDB (async)
+        resp = await create_property(
+            user_telegram_id=user_id,
+            property_data=state
+        )
+
+        logger.info(f"✅ Property created for user {user_id}: {resp}")
+
+        clear_state(user_id)
+
         await update.message.reply_text(
             "✅ اطلاعات ملک با موفقیت ثبت شد!\n"
             "🙏 از همکاری شما متشکریم.\n\n"
             "برای ثبت ملک جدید، می‌توانید دوباره اطلاعات را ارسال کنید.",
             reply_markup=ReplyKeyboardRemove()
         )
-        clear_state(user_id)
-        return
+
+    except Exception as e:
+        logger.error(
+            f"❌ Error saving property for user {user_id}: {e}",
+            exc_info=True
+        )
+        await update.message.reply_text(
+            "❌ در ثبت اطلاعات ملک مشکلی پیش آمد.\n"
+            "لطفاً دوباره تلاش کنید یا بعداً امتحان کنید."
+        )
+
+    return
+
     
     # ✏️ درخواست ویرایش (فقط دکمه)
     if clean_text == "ویرایش":
