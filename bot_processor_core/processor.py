@@ -463,6 +463,7 @@ def _normalize_extracted_data(extracted: Dict) -> Dict:
 async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
     """مدیریت تایید یا ویرایش نهایی اطلاعات"""
     from .handlers import handle_edit_request
+    from nocodb_client import is_confirmation_token_used
 
     clean_text = (
         str(text)
@@ -477,6 +478,24 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
     if clean_text in {"تایید", "تأیید", "بله", "اره", "آره", "ok", "yes"}:
         state = get_state(user_id) or {}
         state.setdefault("user_telegram_id", str(user_id))
+
+        confirmation_token = state.get("confirmation_token")
+        if not confirmation_token:
+            await update.message.reply_text(
+                "❌ خطای سیستمی: توکن تایید یافت نشد.\n"
+                "لطفاً مجدداً تلاش کنید."
+            )
+            return
+
+        # 🛑 Idempotency Guard
+        token_used = await is_confirmation_token_used(confirmation_token)
+        if token_used:
+            await update.message.reply_text(
+                "✅ این آگهی قبلاً با موفقیت ثبت شده است.\n"
+                "⚠️ ثبت مجدد انجام نشد."
+            )
+            clear_state(user_id)
+            return
 
         credit_tx_id = None
 
@@ -497,10 +516,11 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
 
             credit_tx_id = credit_result.get("transaction_id")
 
-            # 2️⃣ ثبت ملک
+            # 2️⃣ ثبت ملک (با confirmation_token)
             resp = await create_property(
                 user_telegram_id=user_id,
-                property_data=state
+                property_data=state,
+                confirmation_token=confirmation_token
             )
 
             logger.info(f"✅ Property created for user {user_id}: {resp}")
@@ -573,6 +593,7 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
         "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
         reply_markup=keyboard
     )
+
 
 
 
