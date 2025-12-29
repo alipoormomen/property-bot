@@ -9,6 +9,11 @@ from extractor import extract_json
 from phone_utils import normalize_iran_phone
 from rule_engine import run_rule_engine
 from nocodb_client import consume_credit, add_credit
+from nocodb_client import (
+    consume_credit,
+    add_credit,
+    is_confirmation_token_used,
+)
 
 from nocodb_client import add_credit
 

@@ -236,3 +236,31 @@ async def test_connection():
 if __name__ == "__main__":
     import asyncio
     asyncio.run(test_connection())
+async def is_confirmation_token_used(confirmation_token: str) -> bool:
+    """
+    ✅ Idempotency Check
+    بررسی می‌کند آیا confirmation_token قبلاً در DB ثبت شده یا نه
+    """
+    if not confirmation_token:
+        return False
+
+    try:
+        resp = await nocodb_request(
+            method="GET",
+            path="/records",
+            params={
+                "where": f"(confirmation_token,eq,{confirmation_token})",
+                "limit": 1,
+            }
+        )
+
+        records = resp.get("list", []) if isinstance(resp, dict) else []
+        return len(records) > 0
+
+    except Exception as e:
+        logger.error(
+            f"❌ Failed to check confirmation_token={confirmation_token}: {e}",
+            exc_info=True
+        )
+        # ⛔ Fail-safe: در صورت خطا، اجازه ثبت تکراری نده
+        return True
