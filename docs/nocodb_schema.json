@@ -1,0 +1,96 @@
+{
+  "project": "PropertyBot",
+  "database": "NocoDB",
+  "connection": {
+    "url": "http://localhost:8080",
+    "auth": "NOCODB_TOKEN (from .env)"
+  },
+  "tables": {
+    "users": {
+      "description": "اطلاعات کاربران تلگرام و اعتبار آنها",
+      "primary_key": "id (internal)",
+      "fields": {
+        "telegram_id": { "type": "number", "required": true, "unique": true },
+        "phone": { "type": "text" },
+        "first_name": { "type": "text" },
+        "last_name": { "type": "text" },
+        "username": { "type": "text" },
+        "balance": { "type": "number", "description": "اعتبار فعلی کاربر" },
+        "total_charged": { "type": "number", "description": "مجموع اعتبار خریداری شده" },
+        "total_used": { "type": "number", "description": "مجموع اعتبار مصرف شده" },
+        "is_active": { "type": "boolean" },
+        "created_at": { "type": "datetime" },
+        "last_activity": { "type": "datetime" }
+      }
+    },
+
+    "packages": {
+      "description": "بسته‌های خرید اعتبار",
+      "fields": {
+        "name": { "type": "text" },
+        "price": { "type": "number", "description": "قیمت به تومان" },
+        "credit": { "type": "number", "description": "مقدار اعتبار بسته" },
+        "description": { "type": "text" },
+        "is_active": { "type": "boolean" }
+      }
+    },
+
+    "transactions": {
+      "description": "تراکنش‌های مالی و مصرف اعتبار",
+      "fields": {
+        "amount": { "type": "number" },
+        "type": { "type": "text", "examples": ["charge", "usage"] },
+        "balance_before": { "type": "number" },
+        "balance_after": { "type": "number" },
+        "description": { "type": "text" },
+        "payment_ref": { "type": "text" },
+        "created_at": { "type": "datetime" },
+        "user_telegram_id": { "type": "number" }
+      }
+    },
+
+    "properties": {
+      "description": "املاک ثبت شده توسط کاربران",
+      "fields": {
+        "city": { "type": "text" },
+        "transaction_type": { "type": "text" },
+        "property_type": { "type": "text" },
+        "neighborhood": { "type": "text" },
+        "address": { "type": "text" },
+        "area": { "type": "number" },
+        "rooms": { "type": "number" },
+        "floor": { "type": "number" },
+        "total_floors": { "type": "number" },
+        "year_built": { "type": "number" },
+        "total_price": { "type": "number" },
+        "price_per_meter": { "type": "number" },
+        "rent_price": { "type": "number" },
+        "deposit": { "type": "number" },
+        "features": { "type": "text" },
+        "description": { "type": "text" },
+        "owner_phone": { "type": "text" },
+        "owner_name": { "type": "text" },
+        "raw_text": { "type": "text" },
+        "source_type": { "type": "text" },
+        "input_tokens": { "type": "number" },
+        "output_tokens": { "type": "number" },
+        "audio_seconds": { "type": "number" },
+        "cost_toman": { "type": "number" },
+        "created_at": { "type": "datetime" },
+        "user_telegram_id": { "type": "number" }
+      }
+    },
+
+    "ai_config": {
+      "description": "تنظیمات قیمت‌گذاری مصرف AI",
+      "fields": {
+        "service": { "type": "text" },
+        "input_rate_usd": { "type": "number" },
+        "output_rate_usd": { "type": "number" },
+        "audio_rate_usd": { "type": "number" },
+        "usd_rate": { "type": "number" },
+        "updated_at": { "type": "datetime" }
+      }
+    }
+  }
+}
