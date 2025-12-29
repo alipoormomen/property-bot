@@ -239,28 +239,29 @@ if __name__ == "__main__":
 async def is_confirmation_token_used(confirmation_token: str) -> bool:
     """
     ✅ Idempotency Check
-    بررسی می‌کند آیا confirmation_token قبلاً در DB ثبت شده یا نه
+    بررسی می‌کند آیا confirmation_token قبلاً در جدول properties ثبت شده یا نه
     """
     if not confirmation_token:
         return False
 
-    try:
-        resp = await nocodb_request(
-            method="GET",
-            path="/records",
-            params={
-                "where": f"(confirmation_token,eq,{confirmation_token})",
-                "limit": 1,
-            }
-        )
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(
+                _table_url("properties"),
+                headers=_headers(),
+                params={
+                    "where": f"(confirmation_token,eq,{confirmation_token})",
+                    "limit": 1,
+                },
+            )
 
-        records = resp.get("list", []) if isinstance(resp, dict) else []
-        return len(records) > 0
+            if resp.status_code != 200:
+                # ⛔ Fail-safe: اگر DB مشکل داشت، ثبت تکراری را مجاز نکن
+                return True
 
-    except Exception as e:
-        logger.error(
-            f"❌ Failed to check confirmation_token={confirmation_token}: {e}",
-            exc_info=True
-        )
-        # ⛔ Fail-safe: در صورت خطا، اجازه ثبت تکراری نده
-        return True
+            records = resp.json().get("list", [])
+            return len(records) > 0
+
+        except Exception:
+            # ⛔ Fail-safe قطعی
+            return True
