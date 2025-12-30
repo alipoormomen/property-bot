@@ -4,18 +4,17 @@
 import logging
 from typing import Dict, Optional, Tuple
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from services.nocodb_client import create_property
-from extractor import extract_json
-from phone_utils import normalize_iran_phone
-from rule_engine import run_rule_engine
-from nocodb_client import consume_credit, add_credit
+
 from nocodb_client import (
+    create_property,
     consume_credit,
     add_credit,
     is_confirmation_token_used,
 )
 
-from nocodb_client import add_credit
+from extractor import extract_json
+from phone_utils import normalize_iran_phone
+from rule_engine import run_rule_engine
 
 from conversation_state import (
     merge_state,
@@ -26,11 +25,13 @@ from conversation_state import (
     set_confirmation_mode,
     is_confirmation_mode,
 )
+
 from services.inference_service import (
     infer_property_type,
     infer_usage_type,
     normalize_location,
 )
+
 from utils import normalize_price, validate_area, validate_floor
 from bot_utils import text_to_int, normalize_yes_no, format_confirmation_message
 
@@ -42,6 +43,7 @@ from .constants import (
     NUMERIC_FIELDS,
     BOOLEAN_FIELDS,
 )
+
 from .utils import (
     normalize_button_input,
     normalize_transaction_type,
