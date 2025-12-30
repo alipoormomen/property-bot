@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 from stt import voice_to_text
 from bot_processor_core import process_text
 from conversation_state import clear_state
+from nocodb_client import get_or_create_user
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +27,24 @@ START_MESSAGE = """👋 سلام! برای ثبت ملک خود، اطلاعات
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
-    user_id = update.effective_user.id
-    clear_state(user_id)
-    await update.message.reply_text(START_MESSAGE, reply_markup=ReplyKeyboardRemove())
+
+    tg_user = update.effective_user
+
+    await get_or_create_user(
+        telegram_id=tg_user.id,
+        username=tg_user.username,
+        first_name=tg_user.first_name,
+        # ❌ last_name حذف شد
+    )
+
+    clear_state(tg_user.id)
+
+    await update.message.reply_text(
+        START_MESSAGE,
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle voice messages"""

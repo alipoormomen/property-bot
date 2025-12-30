@@ -4,14 +4,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ✅ خواندن متغیرهای محیطی
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-AVALAIGPT_API_KEY = os.getenv("AVALAIGPT_API_KEY")  # ✅ تغییر نام
-PROXY_URL = os.getenv("PROXY_URL")
+AVALAIGPT_API_KEY = os.getenv("AVALAIGPT_API_KEY")
+PROXY_URL = os.getenv("PROXY_URL")  # ✅ برگشت
 
-# بررسی متغیرهای ضروری
+NOCODB_URL = os.getenv("NOCODB_URL")
+NOCODB_TOKEN = os.getenv("NOCODB_TOKEN")
+
 if not BOT_TOKEN:
-    raise RuntimeError("❌ BOT_TOKEN در فایل .env تنظیم نشده")
+    raise RuntimeError("❌ BOT_TOKEN تنظیم نشده")
 
-if not AVALAIGPT_API_KEY:  # ✅ تغییر نام
-    raise RuntimeError("❌ AVALAIGPT_API_KEY در فایل .env تنظیم نشده")
+if not AVALAIGPT_API_KEY:
+    raise RuntimeError("❌ AVALAIGPT_API_KEY تنظیم نشده")
+
+if not NOCODB_URL or not NOCODB_TOKEN:
+    raise RuntimeError("❌ NOCODB_URL یا NOCODB_TOKEN تنظیم نشده")

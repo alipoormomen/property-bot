@@ -465,7 +465,6 @@ def _normalize_extracted_data(extracted: Dict) -> Dict:
 async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
     """مدیریت تایید یا ویرایش نهایی اطلاعات"""
     from .handlers import handle_edit_request
-    from nocodb_client import is_confirmation_token_used
 
     clean_text = (
         str(text)
@@ -476,7 +475,7 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
         .lower()
     )
 
-    # ✅ تایید نهایی و ذخیره در دیتابیس
+    # ✅ تایید نهایی
     if clean_text in {"تایید", "تأیید", "بله", "اره", "آره", "ok", "yes"}:
         state = get_state(user_id) or {}
         state.setdefault("user_telegram_id", str(user_id))
@@ -506,10 +505,10 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
             credit_result = await consume_credit(
                 telegram_id=str(user_id),
                 amount=1,
-                reason="property_registration"
+                description="property_registration"
             )
 
-            if not credit_result["success"]:
+            if not credit_result.get("success"):
                 await update.message.reply_text(
                     "❌ اعتبار شما برای ثبت آگهی کافی نیست.\n"
                     "لطفاً بسته اعتباری خریداری کنید."
@@ -518,7 +517,7 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
 
             credit_tx_id = credit_result.get("transaction_id")
 
-            # 2️⃣ ثبت ملک (با confirmation_token)
+            # 2️⃣ ثبت ملک
             resp = await create_property(
                 user_telegram_id=user_id,
                 property_data=state,
@@ -531,8 +530,7 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
 
             await update.message.reply_text(
                 "✅ اطلاعات ملک با موفقیت ثبت شد!\n"
-                "🙏 از همکاری شما متشکریم.\n\n"
-                "برای ثبت ملک جدید، می‌توانید دوباره اطلاعات را ارسال کنید.",
+                "🙏 از همکاری شما متشکریم.",
                 reply_markup=ReplyKeyboardRemove()
             )
 
@@ -542,7 +540,7 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
                 exc_info=True
             )
 
-            # 🔄 Rollback واقعی
+            # 🔄 Rollback اعتبار
             if credit_tx_id:
                 await add_credit(
                     telegram_id=str(user_id),
@@ -558,7 +556,7 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
 
         return
 
-    # ✏️ درخواست ویرایش (دکمه)
+    # ✏️ درخواست ویرایش
     if clean_text == "ویرایش":
         current_state = get_state(user_id)
         summary = format_confirmation_message(current_state)
@@ -571,7 +569,7 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
         await update.message.reply_text(
             f"{summary}\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            "✏️ برای ویرایش، فیلد را به این فرمت ارسال کنید:\n"
+            "✏️ برای ویرایش، فیلد را ارسال کنید:\n"
             "مثال:\n"
             "• متراژ: 120\n"
             "• قیمت: 5000000000\n"
@@ -580,21 +578,20 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
         )
         return
 
-    # ✏️ پردازش ویرایش متنی
-    edit_handled = await handle_edit_request(user_id, text, update)
-    if edit_handled:
+    # ✏️ ویرایش متنی
+    if await handle_edit_request(user_id, text, update):
         return
 
-    # ❌ ورودی نامفهوم
-    keyboard = ReplyKeyboardMarkup(
-        [["✅ تایید", "✏️ ویرایش"]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
+    # ❌ ورودی نامعتبر
     await update.message.reply_text(
         "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
-        reply_markup=keyboard
+        reply_markup=ReplyKeyboardMarkup(
+            [["✅ تایید", "✏️ ویرایش"]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
     )
+
 
 
 
