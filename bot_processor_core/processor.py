@@ -478,7 +478,7 @@ async def _handle_confirmation_mode(user_id: int, text: str, update: Update):
     # ✅ تایید نهایی
     if clean_text in {"تایید", "تأیید", "بله", "اره", "آره", "ok", "yes"}:
         state = get_state(user_id) or {}
-        state.setdefault("user_telegram_id", str(user_id))
+        state.setdefault("user_telegram_id", user_id)
 
         confirmation_token = state.get("confirmation_token")
         if not confirmation_token:

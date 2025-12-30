@@ -1,0 +1,5 @@
+USERS_TABLE_ID        = "m2exwsn2lm2scg7"
+PROPERTIES_TABLE_ID   = "mwgik4tnx5fdrls"
+TRANSACTIONS_TABLE_ID = "mn0clzygu0ex3lq"
+AI_CONFIG_TABLE_ID    = "mea2jyex8qolo6t"
+PACKAGES_TABLE_ID     = "mv3d40e9u4xlmi2"

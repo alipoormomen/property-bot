@@ -3,7 +3,6 @@ from .base import get_client
 
 TRANSACTIONS_TABLE = "transactions"
 
-
 async def create_transaction(payload: dict):
     async with get_client() as client:
         res = await client.post(
@@ -14,3 +13,4 @@ async def create_transaction(payload: dict):
             }
         )
         res.raise_for_status()
+
