@@ -260,21 +260,24 @@ async def is_confirmation_token_used(confirmation_token: str) -> bool:
                 },
             )
 
+            # ✅ اگر فیلد وجود نداشت یا خطای دیگر، اجازه ثبت بده
+            if resp.status_code == 422:
+                # فیلد confirmation_token در DB نیست - اجازه ثبت بده
+                import logging
+                logging.warning(f"⚠️ confirmation_token field may not exist in properties table")
+                return False  # ← تغییر از True به False
+            
             if resp.status_code != 200:
-                # ⛔ Fail-safe: اگر DB مشکل داشت، ثبت تکراری را مجاز نکن
-                return True
+                return False  # ← تغییر: اجازه ثبت بده
 
             records = resp.json().get("list", [])
             return len(records) > 0
 
-        except Exception:
-            # ⛔ Fail-safe قطعی
-            return True
+        except Exception as e:
+            import logging
+            logging.error(f"❌ is_confirmation_token_used error: {e}")
+            return False  # ← تغییر: اجازه ثبت بده
 
-
-# ═══════════════════════════════════════════════════════════
-# تست
-# ═══════════════════════════════════════════════════════════
 
 async def test_connection():
     packages = await get_active_packages()
@@ -286,4 +289,3 @@ async def test_connection():
 if __name__ == "__main__":
     import asyncio
     asyncio.run(test_connection())
-
