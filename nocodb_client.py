@@ -26,12 +26,13 @@ NOCODB_URL = os.getenv("NOCODB_URL", "http://localhost:8080")
 NOCODB_TOKEN = os.getenv("NOCODB_TOKEN")
 
 TABLES = {
-    "users": "m2exwsn2lm2scg7",
-    "properties": "mwgik4tnx5fdrls",
-    "transactions": "mn0clzygu0ex3lq",
-    "packages": "mv3d40e9u4xlmi2",
-    "ai_config": "mea2jyex8qolo6t",
+    "users": "mckjx30dsuf2nrf",         # ✅ جدید
+    "properties": "m99miticq7yjzjs",    # ✅ جدید
+    "transactions": "msqpjqrfa9oriyt",  # ✅ جدید
+    "packages": "mh9bjt95kgyqgij",      # ✅ جدید
+    "ai_config": "mwmvfddokcyjycn",     # ✅ جدید
 }
+
 
 # ═══════════════════════════════════════════════════════════
 
@@ -99,12 +100,18 @@ async def get_user_credit(telegram_id: int) -> int:
     return await get_user_balance(telegram_id)
 
 
-async def add_credit(telegram_id: int, amount: int) -> int:
+async def add_credit(telegram_id, amount: int, reason: str = "شارژ دستی", ref_transaction_id: str = None) -> int:
+    # تبدیل به int اگر string باشد
+    if isinstance(telegram_id, str):
+        telegram_id = int(telegram_id)
+    
     return await charge_credit(
         telegram_id=telegram_id,
         amount=amount,
-        description="شارژ دستی",
+        description=reason,
+        ref_transaction_id=ref_transaction_id,
     )
+
 
 async def refund_credit(
     telegram_id: int,
@@ -132,7 +139,12 @@ async def deduct_credit(telegram_id: int, amount: int) -> Optional[int]:
 # املاک (create_property همان نسخه تأییدشده قبلی شماست)
 # ═══════════════════════════════════════════════════════════
 
-async def create_property(user_telegram_id: int, payload: dict) -> dict:
+async def create_property(user_telegram_id: int, property_data: dict, confirmation_token: str = None) -> dict:
+    payload = {**property_data}
+    if confirmation_token:
+        payload["confirmation_token"] = confirmation_token
+    payload["user_id"] = user_telegram_id
+    
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             _table_url("properties"),
@@ -141,6 +153,7 @@ async def create_property(user_telegram_id: int, payload: dict) -> dict:
         )
         resp.raise_for_status()
         return resp.json()
+
 
 
 # ═══════════════════════════════════════════════════════════
@@ -225,20 +238,12 @@ async def process_ai_request(
 # ═══════════════════════════════════════════════════════════
 # تست
 # ═══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# Idempotency Check
+# ═══════════════════════════════════════════════════════════
 
-async def test_connection():
-    packages = await get_active_packages()
-    print(f"✅ اتصال برقرار – {len(packages)} بسته فعال")
-    for p in packages:
-        print(f"📦 {p.get('name')} → {p.get('credits',0)} اعتبار")
-
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(test_connection())
 async def is_confirmation_token_used(confirmation_token: str) -> bool:
-    """
-    ✅ Idempotency Check
+    """✅ Idempotency Check
     بررسی می‌کند آیا confirmation_token قبلاً در جدول properties ثبت شده یا نه
     """
     if not confirmation_token:
@@ -265,3 +270,20 @@ async def is_confirmation_token_used(confirmation_token: str) -> bool:
         except Exception:
             # ⛔ Fail-safe قطعی
             return True
+
+
+# ═══════════════════════════════════════════════════════════
+# تست
+# ═══════════════════════════════════════════════════════════
+
+async def test_connection():
+    packages = await get_active_packages()
+    print(f"✅ اتصال برقرار – {len(packages)} بسته فعال")
+    for p in packages:
+        print(f"📦 {p.get('name')} → {p.get('credits',0)} اعتبار")
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(test_connection())
+

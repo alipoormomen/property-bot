@@ -1,6 +1,8 @@
 from .users import get_user_by_telegram_id
 from .transactions import create_transaction
 from .base import get_client
+from .tables import USERS_TABLE_ID
+
 
 class InsufficientCredit(Exception):
     pass
@@ -25,15 +27,15 @@ async def charge_credit(
 
     async with get_client() as client:
         await client.patch(
-            "/tables/users/records",
+            f"/tables/{USERS_TABLE_ID}/records",
             json={
-                "Id": user["Id"],
+                "telegram_id": telegram_id,
                 "balance": after,
                 "total_charged": (user.get("total_charged") or 0) + amount
             }
         )
 
-    await create_transaction({
+    return await create_transaction({
         "type": "charge",
         "amount": amount,
         "balance_before": before,
@@ -49,7 +51,7 @@ async def consume_credit(
     description: str
 ):
     if amount <= 0:
-        return
+        return None
 
     user = await get_user_by_telegram_id(telegram_id)
     if not user:
@@ -63,15 +65,15 @@ async def consume_credit(
 
     async with get_client() as client:
         await client.patch(
-            "/tables/users/records",
+            f"/tables/{USERS_TABLE_ID}/records",
             json={
-                "Id": user["Id"],
+                "telegram_id": telegram_id,
                 "balance": after,
                 "total_used": (user.get("total_used") or 0) + amount
             }
         )
 
-    await create_transaction({
+    return await create_transaction({
         "type": "usage",
         "amount": amount,
         "balance_before": before,
